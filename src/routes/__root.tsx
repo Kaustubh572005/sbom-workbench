@@ -78,14 +78,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "SBOM" },
+      { name: "description", content: "SBOM Hub is a web application for managing SBOM and VAPT data from Excel files." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "SBOM" },
+      { property: "og:description", content: "SBOM Hub is a web application for managing SBOM and VAPT data from Excel files." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "SBOM" },
+      { name: "twitter:description", content: "SBOM Hub is a web application for managing SBOM and VAPT data from Excel files." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/6a78e58b-f9ab-4839-abf7-3cedda5652e5/id-preview-715ac21b--7a6089a5-4ec7-49f9-9bb7-4f2d7e57adf6.lovable.app-1781005390232.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/6a78e58b-f9ab-4839-abf7-3cedda5652e5/id-preview-715ac21b--7a6089a5-4ec7-49f9-9bb7-4f2d7e57adf6.lovable.app-1781005390232.png" },
     ],
     links: [
       {
