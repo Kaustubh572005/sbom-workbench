@@ -18,6 +18,14 @@ import {
   ShieldAlert,
   FileSpreadsheet,
   Loader2,
+  Search,
+  AlertTriangle,
+  AlertCircle,
+  CheckCircle2,
+  Info,
+  X,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -57,15 +65,72 @@ async function hashString(s: string): Promise<string> {
     .join("");
 }
 
+const SEVERITY_KEYS = [
+  "severity",
+  "risk",
+  "level",
+  "criticality",
+  "priority",
+  "impact",
+  "cvss",
+  "score",
+];
+
+function detectSeverityColumn(columns: string[]): string | null {
+  const lowerCols = columns.map((c) => c.toLowerCase());
+  for (const key of SEVERITY_KEYS) {
+    const idx = lowerCols.findIndex((c) => c.includes(key));
+    if (idx >= 0) return columns[idx];
+  }
+  return null;
+}
+
+function getSeverityLevel(value: unknown): string {
+  const s = String(value).toLowerCase().trim();
+  if (s.includes("critical") || s.includes("severe") || s.includes("danger")) return "critical";
+  if (s.includes("high") || s.includes("major") || s.includes("important")) return "high";
+  if (s.includes("medium") || s.includes("moderate") || s.includes("warning")) return "medium";
+  if (s.includes("low") || s.includes("minor") || s.includes("trivial")) return "low";
+  if (s.includes("info") || s.includes("informational") || s.includes("note")) return "info";
+  if (!isNaN(Number(s))) {
+    const n = Number(s);
+    if (n >= 9) return "critical";
+    if (n >= 7) return "high";
+    if (n >= 4) return "medium";
+    if (n > 0) return "low";
+  }
+  return "none";
+}
+
+const severityConfig: Record<string, { color: string; bg: string; icon: typeof AlertTriangle; label: string }> = {
+  critical: { color: "text-severity-critical", bg: "bg-severity-critical-bg border-severity-critical", icon: AlertTriangle, label: "Critical" },
+  high: { color: "text-severity-high", bg: "bg-severity-high-bg border-severity-high", icon: AlertTriangle, label: "High" },
+  medium: { color: "text-severity-medium", bg: "bg-severity-medium-bg border-severity-medium", icon: AlertCircle, label: "Medium" },
+  low: { color: "text-severity-low", bg: "bg-severity-low-bg border-severity-low", icon: CheckCircle2, label: "Low" },
+  info: { color: "text-severity-info", bg: "bg-severity-info-bg border-severity-info", icon: Info, label: "Info" },
+  none: { color: "text-muted-foreground", bg: "bg-muted/40 border-border", icon: Info, label: "" },
+};
+
 function Workbench() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [components, setComponents] = useState<Component[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const active = datasets.find((d) => d.id === activeId) ?? null;
+  const severityCol = active ? detectSeverityColumn(active.columns) : null;
+
+  const filteredComponents = useMemo(() => {
+    if (!searchQuery.trim()) return components;
+    const q = searchQuery.toLowerCase();
+    return components.filter((c) =>
+      Object.values(c.data).some((v) => String(v).toLowerCase().includes(q))
+    );
+  }, [components, searchQuery]);
 
   // Load datasets
   useEffect(() => {
@@ -140,7 +205,6 @@ function Workbench() {
         await supabase.from("datasets").update({ columns: mergedCols }).eq("id", datasetId);
       }
 
-      // Build insert rows with content hash for dedupe (append-only)
       const toInsert = await Promise.all(
         rows.map(async (r) => ({
           dataset_id: datasetId!,
@@ -149,13 +213,11 @@ function Workbench() {
         })),
       );
 
-      // Use upsert on (dataset_id, content_hash) to skip duplicates
       const { error: insErr } = await supabase
         .from("components")
         .upsert(toInsert, { onConflict: "dataset_id,content_hash", ignoreDuplicates: true });
       if (insErr) throw insErr;
 
-      // Refresh
       const [{ data: dsAll }, { data: comp }] = await Promise.all([
         supabase.from("datasets").select("*").order("created_at", { ascending: false }),
         supabase.from("components").select("*").eq("dataset_id", datasetId!).order("created_at"),
@@ -292,7 +354,7 @@ function Workbench() {
           </div>
         </aside>
 
-        {/* Main: table */}
+        {/* Main: component cards */}
         <main className="min-w-0 flex-1">
           {active ? (
             <>
@@ -303,7 +365,7 @@ function Workbench() {
                     {active.name}
                   </h2>
                   <p className="text-xs text-muted-foreground">
-                    {components.length} components · {active.columns.length} columns
+                    {filteredComponents.length} of {components.length} components · {active.columns.length} columns
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -330,66 +392,111 @@ function Workbench() {
                 </div>
               </div>
 
-              <div className="overflow-auto rounded-lg border border-border bg-card">
+              {/* Search bar */}
+              <div className="mb-4 relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search components..."
+                  className="pl-9"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Component list */}
+              <div className="space-y-3">
                 {loading ? (
                   <div className="p-12 text-center text-sm text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
                     Loading components...
                   </div>
-                ) : components.length === 0 ? (
-                  <div className="p-12 text-center text-sm text-muted-foreground">
-                    No components yet. Add a row or append another file.
+                ) : filteredComponents.length === 0 ? (
+                  <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-border">
+                    <div className="text-center">
+                      <Search className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+                      <p className="text-sm font-medium">
+                        {searchQuery ? "No matches found" : "No components yet"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {searchQuery ? "Try a different search term." : "Add a row or append another file."}
+                      </p>
+                    </div>
                   </div>
                 ) : (
-                  <table className="w-full border-collapse text-sm">
-                    <thead className="sticky top-0 bg-muted/50 backdrop-blur">
-                      <tr>
-                        <th className="w-10 border-b border-border px-2 py-2 text-left text-xs font-medium text-muted-foreground">
-                          #
-                        </th>
-                        {active.columns.map((col) => (
-                          <th
-                            key={col}
-                            className="min-w-[140px] border-b border-l border-border px-3 py-2 text-left text-xs font-medium text-muted-foreground"
+                  filteredComponents.map((row) => {
+                    const severity = severityCol ? getSeverityLevel(row.data[severityCol]) : "none";
+                    const config = severityConfig[severity] ?? severityConfig.none;
+                    const Icon = config.icon;
+                    const isExpanded = expandedRow === row.id;
+
+                    return (
+                      <div
+                        key={row.id}
+                        className={`rounded-xl border p-4 transition hover:shadow-md ${config.bg}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              {severity !== "none" && (
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-background/80 ${config.color}`}>
+                                  <Icon className="h-3 w-3" />
+                                  {config.label}
+                                </span>
+                              )}
+                              <button
+                                onClick={() => setExpandedRow(isExpanded ? null : row.id)}
+                                className="text-muted-foreground hover:text-foreground transition"
+                              >
+                                {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </button>
+                            </div>
+                            <div className="grid gap-2 mt-2">
+                              {active.columns.slice(0, isExpanded ? undefined : 4).map((col) => (
+                                <div key={col} className="flex items-start gap-2 text-sm">
+                                  <span className="shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-28">
+                                    {col}
+                                  </span>
+                                  <input
+                                    value={String(row.data[col] ?? "")}
+                                    onChange={(e) => updateCell(row.id, col, e.target.value)}
+                                    className="min-w-0 flex-1 bg-transparent outline-none focus:ring-1 focus:ring-ring rounded px-1 -mx-1"
+                                  />
+                                </div>
+                              ))}
+                              {!isExpanded && active.columns.length > 4 && (
+                                <button
+                                  onClick={() => setExpandedRow(row.id)}
+                                  className="text-xs text-muted-foreground hover:text-foreground transition text-left"
+                                >
+                                  + {active.columns.length - 4} more fields
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => deleteRow(row.id)}
+                            className="text-muted-foreground hover:text-destructive transition shrink-0"
+                            aria-label="Delete row"
                           >
-                            {col}
-                          </th>
-                        ))}
-                        <th className="w-10 border-b border-l border-border" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {components.map((row, idx) => (
-                        <tr key={row.id} className="group hover:bg-accent/40">
-                          <td className="border-b border-border px-2 py-1 text-xs text-muted-foreground">
-                            {idx + 1}
-                          </td>
-                          {active.columns.map((col) => (
-                            <td key={col} className="border-b border-l border-border p-0">
-                              <input
-                                value={String(row.data[col] ?? "")}
-                                onChange={(e) => updateCell(row.id, col, e.target.value)}
-                                className="w-full bg-transparent px-3 py-1.5 text-sm outline-none focus:bg-background focus:ring-1 focus:ring-ring"
-                              />
-                            </td>
-                          ))}
-                          <td className="border-b border-l border-border px-2 text-center">
-                            <button
-                              onClick={() => deleteRow(row.id)}
-                              className="text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-destructive"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </>
           ) : (
-            <div className="flex h-96 items-center justify-center rounded-lg border border-dashed border-border">
+            <div className="flex h-96 items-center justify-center rounded-xl border border-dashed border-border">
               <div className="text-center">
                 <Upload className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
                 <p className="text-sm font-medium">No dataset selected</p>
@@ -450,7 +557,7 @@ function ChatPanel({
   }
 
   return (
-    <aside className="flex w-96 shrink-0 flex-col rounded-lg border border-border bg-card">
+    <aside className="flex w-96 shrink-0 flex-col rounded-xl border border-border bg-card">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
         <Sparkles className="h-4 w-4 text-primary" />
         <span className="text-sm font-semibold">Security Analyst</span>
@@ -461,7 +568,7 @@ function ChatPanel({
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: "calc(100vh - 200px)" }}>
         {messages.length === 0 && (
-          <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
+          <div className="rounded-xl border border-dashed border-border p-3 text-xs text-muted-foreground">
             Ask about components, CVEs, severities, or remediations. Try: "Which components have
             known critical vulnerabilities?"
           </div>
@@ -474,7 +581,7 @@ function ChatPanel({
           return (
             <div
               key={m.id}
-              className={`rounded-md px-3 py-2 text-sm ${
+              className={`rounded-xl px-3 py-2 text-sm ${
                 m.role === "user"
                   ? "ml-6 bg-primary text-primary-foreground"
                   : "mr-6 bg-muted"
@@ -492,7 +599,7 @@ function ChatPanel({
           );
         })}
         {status === "submitted" && (
-          <div className="mr-6 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+          <div className="mr-6 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">
             <Loader2 className="inline h-3 w-3 animate-spin" /> thinking...
           </div>
         )}
