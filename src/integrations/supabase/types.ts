@@ -14,7 +14,68 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      components: {
+        Row: {
+          content_hash: string
+          created_at: string
+          data: Json
+          dataset_id: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          content_hash: string
+          created_at?: string
+          data?: Json
+          dataset_id: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          content_hash?: string
+          created_at?: string
+          data?: Json
+          dataset_id?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "components_dataset_id_fkey"
+            columns: ["dataset_id"]
+            isOneToOne: false
+            referencedRelation: "datasets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      datasets: {
+        Row: {
+          columns: Json
+          created_at: string
+          id: string
+          name: string
+          source_filename: string | null
+          updated_at: string
+        }
+        Insert: {
+          columns?: Json
+          created_at?: string
+          id?: string
+          name: string
+          source_filename?: string | null
+          updated_at?: string
+        }
+        Update: {
+          columns?: Json
+          created_at?: string
+          id?: string
+          name?: string
+          source_filename?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
