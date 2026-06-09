@@ -427,7 +427,7 @@ function ChatPanel({
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
   const { messages, sendMessage, status } = useChat({
     transport,
-    onError: (e) => toast.error(e.message),
+    onError: (e: Error) => toast.error(e.message),
   });
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -466,7 +466,7 @@ function ChatPanel({
             known critical vulnerabilities?"
           </div>
         )}
-        {messages.map((m) => {
+        {messages.map((m: (typeof messages)[number]) => {
           const text = m.parts
             .map((p) => (p.type === "text" ? p.text : ""))
             .join("");
