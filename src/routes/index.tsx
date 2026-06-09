@@ -144,7 +144,7 @@ function Workbench() {
       const toInsert = await Promise.all(
         rows.map(async (r) => ({
           dataset_id: datasetId!,
-          data: r,
+          data: r as never,
           content_hash: await hashString(JSON.stringify(r)),
         })),
       );
@@ -179,7 +179,7 @@ function Workbench() {
     setComponents((cs) => cs.map((c) => (c.id === rowId ? { ...c, data: newData } : c)));
     const { error } = await supabase
       .from("components")
-      .update({ data: newData })
+      .update({ data: newData as never })
       .eq("id", rowId);
     if (error) toast.error(error.message);
   }
@@ -190,7 +190,7 @@ function Workbench() {
     const hash = await hashString(JSON.stringify(blank) + Date.now());
     const { data, error } = await supabase
       .from("components")
-      .insert({ dataset_id: active.id, data: blank, content_hash: hash })
+      .insert({ dataset_id: active.id, data: blank as never, content_hash: hash })
       .select()
       .single();
     if (error) return toast.error(error.message);
