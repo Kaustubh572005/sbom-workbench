@@ -461,20 +461,20 @@ function Workbench() {
                             <div className="grid gap-2 mt-2">
                               {active.columns.slice(0, isExpanded ? undefined : 4).map((col) => (
                                 <div key={col} className="flex items-start gap-2 text-sm">
-                                  <span className="shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground w-28">
+                                  <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-foreground/70 w-28 pt-1.5">
                                     {col}
                                   </span>
                                   <input
                                     value={String(row.data[col] ?? "")}
                                     onChange={(e) => updateCell(row.id, col, e.target.value)}
-                                    className="min-w-0 flex-1 bg-transparent outline-none focus:ring-1 focus:ring-ring rounded px-1 -mx-1"
+                                    className="min-w-0 flex-1 bg-background/60 text-foreground font-medium outline-none focus:ring-1 focus:ring-ring rounded px-2 py-1 border border-border/50 focus:bg-background"
                                   />
                                 </div>
                               ))}
                               {!isExpanded && active.columns.length > 4 && (
                                 <button
                                   onClick={() => setExpandedRow(row.id)}
-                                  className="text-xs text-muted-foreground hover:text-foreground transition text-left"
+                                  className="text-xs text-foreground/80 hover:text-foreground transition text-left font-medium"
                                 >
                                   + {active.columns.length - 4} more fields
                                 </button>
