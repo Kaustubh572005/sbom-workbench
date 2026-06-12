@@ -461,13 +461,13 @@ function Workbench() {
                             <div className="grid gap-2 mt-2">
                               {active.columns.slice(0, isExpanded ? undefined : 4).map((col) => (
                                 <div key={col} className="flex items-start gap-2 text-sm">
-                                  <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-foreground w-28 pt-2">
+                                  <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-foreground bg-background/90 rounded px-1.5 py-0.5 w-auto min-w-[7rem] pt-1.5">
                                     {col}
                                   </span>
                                   <input
                                     value={String(row.data[col] ?? "")}
                                     onChange={(e) => updateCell(row.id, col, e.target.value)}
-                                    className="min-w-0 flex-1 bg-background text-foreground font-medium outline-none focus:ring-2 focus:ring-ring rounded-md px-3 py-1.5 border border-border/70 placeholder:text-muted-foreground"
+                                    className="min-w-0 flex-1 bg-background text-foreground font-semibold outline-none focus:ring-2 focus:ring-ring rounded-md px-3 py-1.5 border border-border shadow-sm placeholder:text-muted-foreground"
                                     placeholder="—"
                                   />
                                 </div>
