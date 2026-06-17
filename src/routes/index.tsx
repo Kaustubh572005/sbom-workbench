@@ -556,15 +556,13 @@ function Workbench() {
               {/* Search */}
               <div className="relative">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <motion.div whileFocusWithin={{ scale: 1.005 }}>
-                  <Input
-                    ref={searchRef}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search Component, Vendor, CVE, Version, License…"
-                    className="h-12 rounded-2xl border-border/60 bg-card/60 pl-11 pr-24 text-sm shadow-sm backdrop-blur focus-visible:ring-2 focus-visible:ring-primary/40"
-                  />
-                </motion.div>
+                <Input
+                  ref={searchRef}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search Component, Vendor, CVE, Version, License…"
+                  className="h-12 rounded-2xl border-border/60 bg-card/60 pl-11 pr-24 text-sm shadow-sm backdrop-blur transition focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:scale-[1.005]"
+                />
                 <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1">
                   {searchQuery ? (
                     <button onClick={() => setSearchQuery("")} className="pointer-events-auto rounded-md p-1 text-muted-foreground hover:text-foreground">
