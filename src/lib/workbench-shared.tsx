@@ -351,7 +351,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     const hash = await hashString(JSON.stringify(blank) + Date.now());
     const { data, error } = await supabase.from("components")
       .insert({ dataset_id: active.id, data: blank as never, content_hash: hash }).select().single();
+<<<<<<< HEAD
     if (error) { toast.error(error.message); return; }
+=======
+    if (error) return toast.error(error.message);
+>>>>>>> 4653eb72e133a42a05f9c2a043f2e4b3c1788a85
     setComponents((cs) => [...cs, data as unknown as Component]);
   }, [active]);
 
@@ -365,7 +369,11 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const deleteDataset = useCallback(async (id: string) => {
     if (!confirm("Delete this dataset and all its components?")) return;
     const { error } = await supabase.from("datasets").delete().eq("id", id);
+<<<<<<< HEAD
     if (error) { toast.error(error.message); return; }
+=======
+    if (error) return toast.error(error.message);
+>>>>>>> 4653eb72e133a42a05f9c2a043f2e4b3c1788a85
     setDatasets((prev) => {
       const remaining = prev.filter((d) => d.id !== id);
       if (activeId === id) setActiveId(remaining[0]?.id ?? null);

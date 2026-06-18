@@ -20,11 +20,14 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+<<<<<<< HEAD
 # Environment variables (contains Supabase project keys — never commit)
 .env
 .env.local
 .env.*.local
 
+=======
+>>>>>>> 4653eb72e133a42a05f9c2a043f2e4b3c1788a85
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
