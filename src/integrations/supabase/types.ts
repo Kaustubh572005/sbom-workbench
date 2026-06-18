@@ -55,6 +55,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          owner_id: string | null
           source_filename: string | null
           updated_at: string
         }
@@ -63,6 +64,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          owner_id?: string | null
           source_filename?: string | null
           updated_at?: string
         }
@@ -71,6 +73,7 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          owner_id?: string | null
           source_filename?: string | null
           updated_at?: string
         }
