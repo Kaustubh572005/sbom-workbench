@@ -21,7 +21,7 @@ import {
   Upload, Database, Trash2, Plus, Send, Sparkles, ShieldAlert, ShieldCheck,
   FileSpreadsheet, Loader2, Search, AlertTriangle, AlertCircle, CheckCircle2,
   Info, X, Package, TrendingUp, TrendingDown, Activity, Bug, Download,
-  Building2, Tag, Calendar, FileText, Copy, Edit3, ChevronRight, Layers,
+  Building2, Tag, Calendar, FileText, Copy, Edit3, ChevronRight, ChevronLeft, Layers,
   GitBranch, Hash, Shield, FileBarChart, ExternalLink, ListChecks, Boxes,
   LayoutDashboard, LogOut, ArrowRight,
 } from "lucide-react";
@@ -186,6 +186,8 @@ type WorkbenchCtx = {
   deleteDataset: (id: string) => Promise<void>;
   downloadExcel: () => Promise<void>;
   refresh: () => Promise<void>;
+  aiMinimized: boolean;
+  setAiMinimized: (v: boolean) => void;
 };
 
 const WorkbenchContext = createContext<WorkbenchCtx | null>(null);
@@ -206,6 +208,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [datasetRiskMap, setDatasetRiskMap] = useState<Record<string, { count: number; risk: number }>>({});
   const [lastScan, setLastScan] = useState<Date>(new Date());
+  const [aiMinimized, setAiMinimized] = useState(() => {
+    try { return localStorage.getItem("sbom:aiMinimized") === "1"; } catch { return false; }
+  });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
@@ -267,6 +272,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    try { localStorage.setItem("sbom:aiMinimized", aiMinimized ? "1" : "0"); } catch { /* noop */ }
+  }, [aiMinimized]);
 
   useEffect(() => {
     if (!activeId) { setComponents([]); return; }
@@ -451,6 +460,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     searchQuery, setSearchQuery, severityFilter, setSeverityFilter, drawerId, setDrawerId,
     datasetRiskMap, lastScan, severityCol, severityCounts, riskScore, riskBand, filteredComponents,
     fileInputRef, searchRef, handleFile, updateCell, addRow, deleteRow, deleteDataset, downloadExcel, refresh,
+    aiMinimized, setAiMinimized,
   };
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;
 }
@@ -1053,7 +1063,7 @@ const BASE_PROMPTS = [
 ];
 
 export function AIPanel() {
-  const { active, components, severityFilter, filteredComponents, severityCounts } = useWorkbench();
+  const { active, components, severityFilter, filteredComponents, severityCounts, aiMinimized, setAiMinimized } = useWorkbench();
   const [input, setInput] = useState("");
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
   const { messages, sendMessage, status } = useChat({
@@ -1066,7 +1076,7 @@ export function AIPanel() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, status]);
 
-  useEffect(() => { inputRef.current?.focus(); }, [active?.id]);
+  useEffect(() => { if (!aiMinimized) inputRef.current?.focus(); }, [active?.id, aiMinimized]);
 
   const busy = status === "submitted" || status === "streaming";
 
@@ -1101,6 +1111,35 @@ export function AIPanel() {
     return BASE_PROMPTS;
   }, [severityFilter]);
 
+  if (aiMinimized) {
+    return (
+      <aside className="hidden shrink-0 xl:flex" style={{ width: 56 }}>
+        <div className="card-elevated sticky top-[88px] flex h-[calc(100vh-112px)] w-full flex-col items-center border border-border/60 py-4">
+          <button
+            onClick={() => setAiMinimized(false)}
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-severity-info to-primary text-primary-foreground shadow-lg shadow-primary/30 transition hover:scale-105"
+            title="Expand AI Security Analyst"
+            aria-label="Expand AI Security Analyst"
+          >
+            <Sparkles className="h-4 w-4" />
+          </button>
+          <div className="mt-2 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground" style={{ writingMode: "vertical-rl" }}>
+            Analyst
+          </div>
+          <div className="mt-1.5 flex h-2 w-2 rounded-full bg-severity-low animate-pulse" />
+          <button
+            onClick={() => setAiMinimized(false)}
+            className="mt-auto rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
+            title="Expand"
+            aria-label="Expand AI panel"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className="hidden w-96 shrink-0 xl:flex">
       <div className="card-elevated sticky top-[88px] flex h-[calc(100vh-112px)] w-full flex-col border border-border/60">
@@ -1126,6 +1165,14 @@ export function AIPanel() {
                 {active ? <>Dataset: <span className="text-foreground font-medium">{active.name}</span></> : "No dataset selected"}
               </div>
             </div>
+            <button
+              onClick={() => setAiMinimized(true)}
+              className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
+              title="Minimize AI panel"
+              aria-label="Minimize AI panel"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
           {filterChip && (
             <div className="mt-2 flex items-center gap-2 text-[10px]">
