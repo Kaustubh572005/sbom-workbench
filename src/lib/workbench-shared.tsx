@@ -460,6 +460,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     searchQuery, setSearchQuery, severityFilter, setSeverityFilter, drawerId, setDrawerId,
     datasetRiskMap, lastScan, severityCol, severityCounts, riskScore, riskBand, filteredComponents,
     fileInputRef, searchRef, handleFile, updateCell, addRow, deleteRow, deleteDataset, downloadExcel, refresh,
+    aiMinimized, setAiMinimized,
   };
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;
 }
