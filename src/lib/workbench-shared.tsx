@@ -274,6 +274,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   useEffect(() => { void refresh(); }, [refresh]);
 
   useEffect(() => {
+    try { localStorage.setItem("sbom:aiMinimized", aiMinimized ? "1" : "0"); } catch { /* noop */ }
+  }, [aiMinimized]);
+
+  useEffect(() => {
     if (!activeId) { setComponents([]); return; }
     setLoading(true);
     void (async () => {
