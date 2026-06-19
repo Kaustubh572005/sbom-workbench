@@ -21,7 +21,7 @@ import {
   Upload, Database, Trash2, Plus, Send, Sparkles, ShieldAlert, ShieldCheck,
   FileSpreadsheet, Loader2, Search, AlertTriangle, AlertCircle, CheckCircle2,
   Info, X, Package, TrendingUp, TrendingDown, Activity, Bug, Download,
-  Building2, Tag, Calendar, FileText, Copy, Edit3, ChevronRight, Layers,
+  Building2, Tag, Calendar, FileText, Copy, Edit3, ChevronRight, ChevronLeft, Layers,
   GitBranch, Hash, Shield, FileBarChart, ExternalLink, ListChecks, Boxes,
   LayoutDashboard, LogOut, ArrowRight,
 } from "lucide-react";
