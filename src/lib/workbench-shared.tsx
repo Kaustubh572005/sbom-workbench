@@ -186,6 +186,8 @@ type WorkbenchCtx = {
   deleteDataset: (id: string) => Promise<void>;
   downloadExcel: () => Promise<void>;
   refresh: () => Promise<void>;
+  aiMinimized: boolean;
+  setAiMinimized: (v: boolean) => void;
 };
 
 const WorkbenchContext = createContext<WorkbenchCtx | null>(null);
