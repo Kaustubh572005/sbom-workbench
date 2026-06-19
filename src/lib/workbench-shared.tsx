@@ -208,6 +208,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [datasetRiskMap, setDatasetRiskMap] = useState<Record<string, { count: number; risk: number }>>({});
   const [lastScan, setLastScan] = useState<Date>(new Date());
+  const [aiMinimized, setAiMinimized] = useState(() => {
+    try { return localStorage.getItem("sbom:aiMinimized") === "1"; } catch { return false; }
+  });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
