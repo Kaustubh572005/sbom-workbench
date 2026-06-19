@@ -351,11 +351,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     const hash = await hashString(JSON.stringify(blank) + Date.now());
     const { data, error } = await supabase.from("components")
       .insert({ dataset_id: active.id, data: blank as never, content_hash: hash }).select().single();
-<<<<<<< HEAD
     if (error) { toast.error(error.message); return; }
-=======
-    if (error) return toast.error(error.message);
->>>>>>> 4653eb72e133a42a05f9c2a043f2e4b3c1788a85
     setComponents((cs) => [...cs, data as unknown as Component]);
   }, [active]);
 
