@@ -1273,7 +1273,9 @@ export function AIPanel() {
                 <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-pre:my-1.5 prose-table:my-2 prose-table:text-xs prose-headings:mt-2 prose-headings:mb-1 prose-th:bg-muted/40 prose-th:border-border prose-td:border-border prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-code:rounded prose-code:bg-muted/60 prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none">
                   <ReactMarkdown>{text || "…"}</ReactMarkdown>
                 </div>
+                {report && <div className="mt-2"><AnalysisReportCard report={report} /></div>}
               </motion.div>
+
             );
           })}
           {status === "submitted" && (
