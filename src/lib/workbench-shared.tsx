@@ -303,12 +303,21 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const handleFile = useCallback(async (file: File, targetDatasetId: string | null) => {
     setUploading(true);
     try {
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      if (!rows.length) { toast.error("No rows found in sheet"); return; }
-      const sheetCols = Array.from(rows.reduce((a, r) => { Object.keys(r).forEach((k) => a.add(k)); return a; }, new Set<string>()));
+      let rows: Record<string, unknown>[] = [];
+      let sheetCols: string[] = [];
+      if (isJsonFile(file.name)) {
+        const { rows: jr, columns: jc, format } = normalizeJsonSbom(await file.text());
+        rows = jr; sheetCols = jc;
+        toast.info(`Detected ${format} document`);
+      } else {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+        sheetCols = Array.from(rows.reduce((a, r) => { Object.keys(r).forEach((k) => a.add(k)); return a; }, new Set<string>()));
+      }
+      if (!rows.length) { toast.error("No rows found in file"); return; }
+
 
       let datasetId = targetDatasetId;
       if (!datasetId) {
