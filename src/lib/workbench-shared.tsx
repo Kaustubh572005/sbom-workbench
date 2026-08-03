@@ -1105,8 +1105,34 @@ export function AIPanel() {
     const t = (text ?? input).trim();
     if (!t || busy) return;
     if (!text) setInput("");
-    await sendMessage({ text: t }, { body: { datasetContext } });
+
+    // Local deterministic analysis over the FULL dataset (scales to 100k+ rows)
+    let report: AnalysisReport | null = null;
+    if (active) {
+      try {
+        report = buildReport(t, { datasetName: active.name, rows: contextRows.map((c) => c.data) });
+      } catch {
+        report = null;
+      }
+      if (report) setReports((prev) => ({ ...prev, [t.toLowerCase()]: report! }));
+    }
+
+    const analysis = report
+      ? {
+          title: report.title,
+          intent: report.intent,
+          matchedRows: report.matchedRows,
+          summary: report.summary,
+          kpis: report.kpis,
+          recommendations: report.recommendations,
+          sample: report.tables[0]?.rows.slice(0, 25) ?? [],
+          sampleColumns: report.tables[0]?.columns ?? [],
+        }
+      : null;
+
+    await sendMessage({ text: t }, { body: { datasetContext, analysis } });
   }
+
 
   const filterChip = severityFilter !== "all" ? severityConfig[severityFilter] : null;
 
