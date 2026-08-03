@@ -6,13 +6,14 @@ import { z } from "zod";
 type ChatRequestBody = {
   messages?: unknown;
   datasetContext?: { name: string; columns: string[]; rows: Record<string, unknown>[] };
+  analysis?: Record<string, unknown> | null;
 };
 
 export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const { messages, datasetContext } = (await request.json()) as ChatRequestBody;
+        const { messages, datasetContext, analysis } = (await request.json()) as ChatRequestBody;
         if (!Array.isArray(messages)) return new Response("Messages required", { status: 400 });
 
         const key = process.env.LOVABLE_API_KEY;
@@ -21,18 +22,24 @@ export const Route = createFileRoute("/api/chat")({
         const gateway = createLovableAiGatewayProvider(key);
 
         const ctxText = datasetContext
-          ? `\n\nACTIVE DATASET: "${datasetContext.name}"\nColumns: ${datasetContext.columns.join(", ")}\nRows (${datasetContext.rows.length}):\n${JSON.stringify(datasetContext.rows.slice(0, 200), null, 2)}`
+          ? `\n\nACTIVE DATASET: "${datasetContext.name}"\nColumns: ${datasetContext.columns.join(", ")}\nSample rows (${datasetContext.rows.length}):\n${JSON.stringify(datasetContext.rows.slice(0, 150))}`
           : "\n\nNo dataset currently loaded.";
 
-        const system = `You are a security analyst assistant for SBOM (Software Bill of Materials) and VAPT (Vulnerability Assessment & Penetration Testing) data. Help the user understand components, identify vulnerabilities, suggest remediations, and answer questions about the loaded dataset.
+        const analysisText = analysis
+          ? `\n\nPRE-COMPUTED ANALYSIS (authoritative — computed deterministically over the FULL dataset, not just the sample above; the UI is already rendering these KPIs, charts and tables next to your reply):\n${JSON.stringify(analysis)}\n\nWrite a tight narrative that INTERPRETS this analysis: what it means for the business, what is most urgent, what to do next. Do NOT restate every number and do NOT reproduce the full table — the UI shows it. Never contradict these figures.`
+          : "";
 
-When asked about CVEs, vulnerabilities, or security advisories for specific components/versions, use the lookup_vulnerability tool to fetch the latest public knowledge from the NVD/OSV databases. Cite versions and CVE IDs precisely. Render tables in markdown when helpful.${ctxText}`;
+        const system = `You are an enterprise AI Cyber Risk Analyst for SBOM (Software Bill of Materials) and VAPT data. You reason like a senior security architect: prioritize by exploitability and business impact, name concrete versions and CVE IDs, and always end with clear next actions.
+
+When asked about CVEs, exploitability, KEV status or advisories for specific components/versions, use the lookup_vulnerability tool to fetch current public data from OSV.dev. Use markdown (short paragraphs, bold labels, small tables only when the UI is not already showing one).${analysisText}${ctxText}`;
 
         const result = streamText({
-          model: gateway("google/gemini-3-flash-preview"),
+          model: gateway("openai/gpt-5.6-sol"),
           system,
           messages: await convertToModelMessages(messages as UIMessage[]),
           stopWhen: stepCountIs(8),
+          providerOptions: { lovable: { reasoningEffort: "none" } },
+
           tools: {
             lookup_vulnerability: tool({
               description:
