@@ -1078,6 +1078,8 @@ const BASE_PROMPTS = [
 export function AIPanel() {
   const { active, components, severityFilter, filteredComponents, severityCounts, aiMinimized, setAiMinimized } = useWorkbench();
   const [input, setInput] = useState("");
+  const [reports, setReports] = useState<Record<string, AnalysisReport>>({});
+
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
   const { messages, sendMessage, status } = useChat({
     transport, onError: (e: Error) => toast.error(e.message),
