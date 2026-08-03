@@ -590,7 +590,7 @@ export function Header({ userEmail, onSignOut }: { userEmail?: string; onSignOut
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.json,.cdx,.spdx" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f, null); }} />
           {active && (
             <Button onClick={() => void downloadExcel()} variant="outline" size="sm" className="rounded-xl">
