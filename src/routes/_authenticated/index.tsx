@@ -46,7 +46,7 @@ function DashboardPage() {
               </Button>
               <Button size="sm" variant="outline" disabled={uploading} className="rounded-lg"
                 onClick={() => {
-                  const i = document.createElement("input"); i.type = "file"; i.accept = ".xlsx,.xls,.csv";
+                  const i = document.createElement("input"); i.type = "file"; i.accept = ".xlsx,.xls,.csv,.json,.cdx,.spdx";
                   i.onchange = () => { const f = i.files?.[0]; if (f) void handleFile(f, active.id); }; i.click();
                 }}>
                 <Upload className="mr-1 h-3.5 w-3.5" /> Append

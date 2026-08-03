@@ -14,6 +14,10 @@ import {
   BarChart, Bar,
 } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
+import { isJsonFile, normalizeJsonSbom } from "@/lib/sbom-import";
+import { buildReport, type AnalysisReport } from "@/lib/risk-intel";
+import { AnalysisReportCard } from "@/components/AnalysisReport";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -303,12 +307,21 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const handleFile = useCallback(async (file: File, targetDatasetId: string | null) => {
     setUploading(true);
     try {
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      if (!rows.length) { toast.error("No rows found in sheet"); return; }
-      const sheetCols = Array.from(rows.reduce((a, r) => { Object.keys(r).forEach((k) => a.add(k)); return a; }, new Set<string>()));
+      let rows: Record<string, unknown>[] = [];
+      let sheetCols: string[] = [];
+      if (isJsonFile(file.name)) {
+        const { rows: jr, columns: jc, format } = normalizeJsonSbom(await file.text());
+        rows = jr; sheetCols = jc;
+        toast.info(`Detected ${format} document`);
+      } else {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+        sheetCols = Array.from(rows.reduce((a, r) => { Object.keys(r).forEach((k) => a.add(k)); return a; }, new Set<string>()));
+      }
+      if (!rows.length) { toast.error("No rows found in file"); return; }
+
 
       let datasetId = targetDatasetId;
       if (!datasetId) {
@@ -577,7 +590,7 @@ export function Header({ userEmail, onSignOut }: { userEmail?: string; onSignOut
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.json,.cdx,.spdx" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f, null); }} />
           {active && (
             <Button onClick={() => void downloadExcel()} variant="outline" size="sm" className="rounded-xl">
@@ -1053,18 +1066,23 @@ export function NoDataset() {
 
 /* ============================== UI: AI Panel ============================== */
 const BASE_PROMPTS = [
-  { icon: AlertTriangle, label: "Critical CVEs", prompt: "List all components in the current dataset with Critical severity. Include CVE IDs and CVSS scores in a markdown table." },
-  { icon: Activity, label: "Highest CVSS", prompt: "Which 5 components have the highest CVSS scores? Show them in a markdown table." },
-  { icon: Boxes, label: "Apps at risk", prompt: "Which applications have the most vulnerabilities? Rank top 5 with counts." },
-  { icon: Building2, label: "Top vendors", prompt: "Which vendors/suppliers contribute the most vulnerable components? Top 5 with counts." },
-  { icon: FileBarChart, label: "Executive summary", prompt: "Generate a concise executive summary of the security posture: overall risk, top concerns, recommended next steps." },
-  { icon: ShieldCheck, label: "Compliance report", prompt: "Generate a markdown compliance report covering vulnerable components, license exposure, and remediation status." },
-  { icon: Shield, label: "Remediation plan", prompt: "Produce a prioritized remediation plan for the highest-risk components. Include fix versions where known." },
+  { icon: FileBarChart, label: "Executive overview", prompt: "Give me an executive overview of the overall security posture of this dataset." },
+  { icon: Bug, label: "Exploitable now", prompt: "Which components are exploitable right now (KEV / known exploited / CVSS 9+)?" },
+  { icon: ShieldCheck, label: "Compliance readiness", prompt: "Assess compliance readiness: SBOM completeness, license coverage and remediation status." },
+  { icon: Shield, label: "Remediation plan", prompt: "Produce a prioritized remediation plan for the highest-risk components, including fix versions where known." },
+  { icon: Calendar, label: "EOL components", prompt: "Which components are end-of-life, deprecated or unsupported?" },
+  { icon: FileText, label: "License exposure", prompt: "Analyze license exposure and copyleft legal risk across the dataset." },
+  { icon: Activity, label: "Top CVEs", prompt: "Analyze the top CVEs by CVSS in this dataset." },
+  { icon: Building2, label: "Vendor concentration", prompt: "Which vendors concentrate the most risk?" },
+  { icon: Boxes, label: "Apps at risk", prompt: "Which applications carry the most vulnerabilities?" },
 ];
+
 
 export function AIPanel() {
   const { active, components, severityFilter, filteredComponents, severityCounts, aiMinimized, setAiMinimized } = useWorkbench();
   const [input, setInput] = useState("");
+  const [reports, setReports] = useState<Record<string, AnalysisReport>>({});
+
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
   const { messages, sendMessage, status } = useChat({
     transport, onError: (e: Error) => toast.error(e.message),
@@ -1092,8 +1110,34 @@ export function AIPanel() {
     const t = (text ?? input).trim();
     if (!t || busy) return;
     if (!text) setInput("");
-    await sendMessage({ text: t }, { body: { datasetContext } });
+
+    // Local deterministic analysis over the FULL dataset (scales to 100k+ rows)
+    let report: AnalysisReport | null = null;
+    if (active) {
+      try {
+        report = buildReport(t, { datasetName: active.name, rows: contextRows.map((c) => c.data) });
+      } catch {
+        report = null;
+      }
+      if (report) setReports((prev) => ({ ...prev, [t.toLowerCase()]: report! }));
+    }
+
+    const analysis = report
+      ? {
+          title: report.title,
+          intent: report.intent,
+          matchedRows: report.matchedRows,
+          summary: report.summary,
+          kpis: report.kpis,
+          recommendations: report.recommendations,
+          sample: report.tables[0]?.rows.slice(0, 25) ?? [],
+          sampleColumns: report.tables[0]?.columns ?? [],
+        }
+      : null;
+
+    await sendMessage({ text: t }, { body: { datasetContext, analysis } });
   }
+
 
   const filterChip = severityFilter !== "all" ? severityConfig[severityFilter] : null;
 
@@ -1205,10 +1249,21 @@ export function AIPanel() {
               </div>
             </div>
           )}
-          {messages.map((m) => {
+          {messages.map((m, mi) => {
             const text = m.parts.map((p) => (p.type === "text" ? p.text : "")).join("");
             const tools = m.parts.filter((p) => p.type.startsWith("tool-"));
+            let report: AnalysisReport | undefined;
+            if (m.role === "assistant") {
+              for (let j = mi - 1; j >= 0; j--) {
+                if (messages[j].role === "user") {
+                  const q = messages[j].parts.map((p) => (p.type === "text" ? p.text : "")).join("").trim().toLowerCase();
+                  report = reports[q];
+                  break;
+                }
+              }
+            }
             return (
+
               <motion.div key={m.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
                 className={m.role === "user"
                   ? "ml-6 rounded-2xl bg-primary px-3.5 py-2.5 text-sm text-primary-foreground shadow-md shadow-primary/20"
@@ -1221,7 +1276,9 @@ export function AIPanel() {
                 <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-pre:my-1.5 prose-table:my-2 prose-table:text-xs prose-headings:mt-2 prose-headings:mb-1 prose-th:bg-muted/40 prose-th:border-border prose-td:border-border prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-code:rounded prose-code:bg-muted/60 prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none">
                   <ReactMarkdown>{text || "…"}</ReactMarkdown>
                 </div>
+                {report && <div className="mt-2"><AnalysisReportCard report={report} /></div>}
               </motion.div>
+
             );
           })}
           {status === "submitted" && (
