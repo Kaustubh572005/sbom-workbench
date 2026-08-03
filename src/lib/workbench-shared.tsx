@@ -1246,10 +1246,21 @@ export function AIPanel() {
               </div>
             </div>
           )}
-          {messages.map((m) => {
+          {messages.map((m, mi) => {
             const text = m.parts.map((p) => (p.type === "text" ? p.text : "")).join("");
             const tools = m.parts.filter((p) => p.type.startsWith("tool-"));
+            let report: AnalysisReport | undefined;
+            if (m.role === "assistant") {
+              for (let j = mi - 1; j >= 0; j--) {
+                if (messages[j].role === "user") {
+                  const q = messages[j].parts.map((p) => (p.type === "text" ? p.text : "")).join("").trim().toLowerCase();
+                  report = reports[q];
+                  break;
+                }
+              }
+            }
             return (
+
               <motion.div key={m.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
                 className={m.role === "user"
                   ? "ml-6 rounded-2xl bg-primary px-3.5 py-2.5 text-sm text-primary-foreground shadow-md shadow-primary/20"
