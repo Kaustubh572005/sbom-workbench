@@ -1066,14 +1066,17 @@ export function NoDataset() {
 
 /* ============================== UI: AI Panel ============================== */
 const BASE_PROMPTS = [
-  { icon: AlertTriangle, label: "Critical CVEs", prompt: "List all components in the current dataset with Critical severity. Include CVE IDs and CVSS scores in a markdown table." },
-  { icon: Activity, label: "Highest CVSS", prompt: "Which 5 components have the highest CVSS scores? Show them in a markdown table." },
-  { icon: Boxes, label: "Apps at risk", prompt: "Which applications have the most vulnerabilities? Rank top 5 with counts." },
-  { icon: Building2, label: "Top vendors", prompt: "Which vendors/suppliers contribute the most vulnerable components? Top 5 with counts." },
-  { icon: FileBarChart, label: "Executive summary", prompt: "Generate a concise executive summary of the security posture: overall risk, top concerns, recommended next steps." },
-  { icon: ShieldCheck, label: "Compliance report", prompt: "Generate a markdown compliance report covering vulnerable components, license exposure, and remediation status." },
-  { icon: Shield, label: "Remediation plan", prompt: "Produce a prioritized remediation plan for the highest-risk components. Include fix versions where known." },
+  { icon: FileBarChart, label: "Executive overview", prompt: "Give me an executive overview of the overall security posture of this dataset." },
+  { icon: Bug, label: "Exploitable now", prompt: "Which components are exploitable right now (KEV / known exploited / CVSS 9+)?" },
+  { icon: ShieldCheck, label: "Compliance readiness", prompt: "Assess compliance readiness: SBOM completeness, license coverage and remediation status." },
+  { icon: Shield, label: "Remediation plan", prompt: "Produce a prioritized remediation plan for the highest-risk components, including fix versions where known." },
+  { icon: Calendar, label: "EOL components", prompt: "Which components are end-of-life, deprecated or unsupported?" },
+  { icon: FileText, label: "License exposure", prompt: "Analyze license exposure and copyleft legal risk across the dataset." },
+  { icon: Activity, label: "Top CVEs", prompt: "Analyze the top CVEs by CVSS in this dataset." },
+  { icon: Building2, label: "Vendor concentration", prompt: "Which vendors concentrate the most risk?" },
+  { icon: Boxes, label: "Apps at risk", prompt: "Which applications carry the most vulnerabilities?" },
 ];
+
 
 export function AIPanel() {
   const { active, components, severityFilter, filteredComponents, severityCounts, aiMinimized, setAiMinimized } = useWorkbench();
