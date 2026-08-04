@@ -159,6 +159,16 @@ const iconFor = (col: string) => {
   return FileText;
 };
 
+/* ============================== AI bridge ============================== */
+const ASK_EVENT = "sbom:ask-analyst";
+/** Send a question straight to the AI Security Analyst panel from anywhere. */
+export function askAnalyst(prompt: string) {
+  try {
+    localStorage.setItem("sbom:aiMinimized", "0");
+  } catch { /* noop */ }
+  window.dispatchEvent(new CustomEvent<string>(ASK_EVENT, { detail: prompt }));
+}
+
 /* ============================== Context ============================== */
 type WorkbenchCtx = {
   datasets: Dataset[];
@@ -1138,6 +1148,18 @@ export function AIPanel() {
     await sendMessage({ text: t }, { body: { datasetContext, analysis } });
   }
 
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const prompt = (e as CustomEvent<string>).detail;
+      if (!prompt) return;
+      setAiMinimized(false);
+      void submit(prompt);
+    };
+    window.addEventListener(ASK_EVENT, handler);
+    return () => window.removeEventListener(ASK_EVENT, handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, components, severityFilter, filteredComponents, busy]);
 
   const filterChip = severityFilter !== "all" ? severityConfig[severityFilter] : null;
 
