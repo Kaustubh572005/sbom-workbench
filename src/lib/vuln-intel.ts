@@ -364,7 +364,7 @@ export function buildVulnIntel(
     },
   ];
 
-  const loopholes: Loophole[] = [
+  const loopholes: Loophole[] = ([
     { category: "Unpatched components", affected: withoutFix.length, severity: "critical", detail: "No fix version or remediation documented." },
     { category: "Unsupported / EOL software", affected: eolRecords.length, severity: "critical", detail: "Will never receive future security fixes." },
     { category: "Missing supplier information", affected: missingSupplier.length, severity: "high", detail: "Provenance cannot be verified — supply-chain blind spot." },
@@ -373,7 +373,7 @@ export function buildVulnIntel(
     { category: "Multiple critical CVEs on one component", affected: componentsAtRisk.filter((g) => g.critical > 1).length, severity: "critical", detail: "Concentrated, high-probability attack paths." },
     { category: "High attack-surface packages", affected: records.filter((r) => r.cvss >= 9).length, severity: "critical", detail: "CVSS ≥ 9 — network-reachable, low-complexity exploitation." },
     { category: "Unknown license exposure", affected: missingLicense.length, severity: "medium", detail: "Blocks SBOM attestation and legal sign-off." },
-  ].filter((l) => l.affected > 0);
+  ] as Loophole[]).filter((l) => l.affected > 0);
 
   const trend = Array.from({ length: 12 }, (_, i) => {
     const factor = 0.55 + i * 0.04;
