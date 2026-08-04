@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -217,8 +217,8 @@ export function DataTable<T>({
               const k = getKey(row);
               const isOpen = openRow === k;
               return (
-                <>
-                  <tr key={k} className="border-b border-border/40 transition hover:bg-accent/40">
+                <Fragment key={k}>
+                  <tr className="border-b border-border/40 transition hover:bg-accent/40">
                     {expand && (
                       <td className="px-2 py-2">
                         <button onClick={() => setOpenRow(isOpen ? null : k)} aria-label="Expand row"
@@ -242,11 +242,11 @@ export function DataTable<T>({
                     )}
                   </tr>
                   {expand && isOpen && (
-                    <tr key={`${k}-x`} className="border-b border-border/40 bg-muted/20">
+                    <tr className="border-b border-border/40 bg-muted/20">
                       <td colSpan={columns.length + 2} className="px-6 py-4">{expand(row)}</td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               );
             })}
           </tbody>
