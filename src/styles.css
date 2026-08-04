@@ -166,9 +166,9 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     background-image:
-      radial-gradient(1200px 700px at 0% -10%, color-mix(in oklab, var(--color-primary) 18%, transparent), transparent 60%),
-      radial-gradient(900px 600px at 100% 0%, color-mix(in oklab, var(--color-severity-info) 14%, transparent), transparent 60%),
-      linear-gradient(180deg, oklch(0.14 0.025 255) 0%, oklch(0.18 0.03 255) 100%);
+      radial-gradient(1200px 700px at 0% -10%, color-mix(in oklab, var(--color-primary) 10%, transparent), transparent 60%),
+      radial-gradient(900px 600px at 100% 0%, color-mix(in oklab, var(--color-severity-info) 8%, transparent), transparent 60%),
+      linear-gradient(180deg, oklch(0.99 0.004 250) 0%, oklch(0.96 0.008 250) 100%);
     background-attachment: fixed;
     min-height: 100vh;
   }
@@ -185,8 +185,8 @@
   background: color-mix(in oklab, var(--color-card) 92%, transparent);
   backdrop-filter: blur(14px) saturate(140%);
   box-shadow:
-    0 10px 30px -10px rgba(0, 0, 0, 0.5),
-    0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    0 8px 24px -12px rgba(15, 23, 42, 0.18),
+    0 1px 0 rgba(255, 255, 255, 0.6) inset;
   transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
 }
 @utility card-hover {
@@ -194,8 +194,8 @@
   &:hover {
     transform: translateY(-3px);
     box-shadow:
-      0 18px 42px -10px rgba(0, 0, 0, 0.6),
-      0 1px 0 rgba(255, 255, 255, 0.06) inset;
+      0 16px 36px -12px rgba(15, 23, 42, 0.24),
+      0 1px 0 rgba(255, 255, 255, 0.7) inset;
   }
 }
 
@@ -203,7 +203,7 @@
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--color-severity-critical) 55%, transparent),
     0 0 40px -6px color-mix(in oklab, var(--color-severity-critical) 55%, transparent),
-    0 10px 30px -10px rgba(0, 0, 0, 0.5);
+    0 8px 24px -12px rgba(15, 23, 42, 0.2);
 }
 
 @utility chip {
