@@ -159,6 +159,16 @@ const iconFor = (col: string) => {
   return FileText;
 };
 
+/* ============================== AI bridge ============================== */
+const ASK_EVENT = "sbom:ask-analyst";
+/** Send a question straight to the AI Security Analyst panel from anywhere. */
+export function askAnalyst(prompt: string) {
+  try {
+    localStorage.setItem("sbom:aiMinimized", "0");
+  } catch { /* noop */ }
+  window.dispatchEvent(new CustomEvent<string>(ASK_EVENT, { detail: prompt }));
+}
+
 /* ============================== Context ============================== */
 type WorkbenchCtx = {
   datasets: Dataset[];
@@ -951,7 +961,7 @@ export function DetailDrawer() {
       {row && (
         <>
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={() => setDrawerId(null)} />
+            className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm" onClick={() => setDrawerId(null)} />
           <motion.aside initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 240 }}
             className="fixed right-0 top-0 z-50 flex h-full w-full max-w-xl flex-col border-l border-border/60 bg-card shadow-2xl">
@@ -1139,6 +1149,18 @@ export function AIPanel() {
   }
 
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const prompt = (e as CustomEvent<string>).detail;
+      if (!prompt) return;
+      setAiMinimized(false);
+      void submit(prompt);
+    };
+    window.addEventListener(ASK_EVENT, handler);
+    return () => window.removeEventListener(ASK_EVENT, handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, components, severityFilter, filteredComponents, busy]);
+
   const filterChip = severityFilter !== "all" ? severityConfig[severityFilter] : null;
 
   // Context-aware suggested prompts
@@ -1273,7 +1295,7 @@ export function AIPanel() {
                     <Loader2 className="h-2.5 w-2.5 animate-spin" /> Looking up vulnerability data…
                   </div>
                 )}
-                <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-pre:my-1.5 prose-table:my-2 prose-table:text-xs prose-headings:mt-2 prose-headings:mb-1 prose-th:bg-muted/40 prose-th:border-border prose-td:border-border prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-code:rounded prose-code:bg-muted/60 prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none">
+                <div className="prose prose-sm max-w-none prose-p:my-1 prose-pre:my-1.5 prose-table:my-2 prose-table:text-xs prose-headings:mt-2 prose-headings:mb-1 prose-th:bg-muted/40 prose-th:border-border prose-td:border-border prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-code:rounded prose-code:bg-muted/60 prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none">
                   <ReactMarkdown>{text || "…"}</ReactMarkdown>
                 </div>
                 {report && <div className="mt-2"><AnalysisReportCard report={report} /></div>}
