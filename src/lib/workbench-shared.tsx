@@ -14,7 +14,7 @@ import {
   BarChart, Bar,
 } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
-import { isJsonFile, normalizeJsonSbom } from "@/lib/sbom-import";
+import { parseSbomText, normalizeTabularRows } from "@/lib/sbom-parse";
 import { buildReport, type AnalysisReport } from "@/lib/risk-intel";
 import { AnalysisReportCard } from "@/components/AnalysisReport";
 
