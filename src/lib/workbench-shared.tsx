@@ -324,7 +324,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         const { rows: jr, columns: jc, format, notes } = parseSbomText(await file.text(), file.name);
         rows = jr; sheetCols = jc;
         toast.info(`Detected ${format} — ${jr.length} components extracted`);
-        notes.forEach((nt) => toast.message(nt));
+        notes.forEach((nt: string) => toast.message(nt));
       } else {
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array" });
