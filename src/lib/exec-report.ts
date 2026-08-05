@@ -133,7 +133,7 @@ export function buildExecReport(dataset: string, risks: ComponentRisk[]): ExecRe
     { title: "Copyleft / restrictive licenses", count: risks.filter((r) => /agpl|gpl|sspl/i.test(r.license)).length, impact: "medium", detail: "Distribution may trigger source-disclosure obligations." },
     { title: "Multiple versions of the same component", count: risks.filter((r) => r.factors.some((f) => /Multiple versions/.test(f.label))).length, impact: "medium", detail: "Divergent versions multiply patch effort and hide vulnerable copies." },
     { title: "Fixes not yet identified", count: risks.filter((r) => !r.fixAvailable && (r.severity === "critical" || r.severity === "high")).length, impact: "critical", detail: "High-severity exposure with no known upgrade path — needs compensating controls." },
-  ].filter((l) => l.count > 0);
+  ] as ExecReport["loopholes"]).filter((l) => l.count > 0);
 
   const complianceStatus: ExecReport["complianceStatus"] = [
     {
