@@ -498,6 +498,8 @@ const NAV_ITEMS = [
   { to: "/components", icon: Package, label: "Components" },
   { to: "/vulnerabilities", icon: ShieldAlert, label: "Vulnerabilities" },
   { to: "/reports", icon: FileBarChart, label: "Reports" },
+  { to: "/executive", icon: Landmark, label: "Executive Report" },
+
   { to: "/sbom", icon: FileSpreadsheet, label: "SBOM" },
   { to: "/datasets", icon: Database, label: "Datasets" },
 ] as const;
