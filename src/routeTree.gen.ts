@@ -16,6 +16,7 @@ import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as AuthenticatedVulnerabilitiesRouteImport } from './routes/_authenticated/vulnerabilities'
 import { Route as AuthenticatedSbomRouteImport } from './routes/_authenticated/sbom'
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
+import { Route as AuthenticatedExecutiveRouteImport } from './routes/_authenticated/executive'
 import { Route as AuthenticatedDatasetsRouteImport } from './routes/_authenticated/datasets'
 import { Route as AuthenticatedComponentsRouteImport } from './routes/_authenticated/components'
 
@@ -54,6 +55,11 @@ const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
   path: '/reports',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedExecutiveRoute = AuthenticatedExecutiveRouteImport.update({
+  id: '/executive',
+  path: '/executive',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedDatasetsRoute = AuthenticatedDatasetsRouteImport.update({
   id: '/datasets',
   path: '/datasets',
@@ -70,6 +76,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/components': typeof AuthenticatedComponentsRoute
   '/datasets': typeof AuthenticatedDatasetsRoute
+  '/executive': typeof AuthenticatedExecutiveRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/sbom': typeof AuthenticatedSbomRoute
   '/vulnerabilities': typeof AuthenticatedVulnerabilitiesRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/components': typeof AuthenticatedComponentsRoute
   '/datasets': typeof AuthenticatedDatasetsRoute
+  '/executive': typeof AuthenticatedExecutiveRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/sbom': typeof AuthenticatedSbomRoute
   '/vulnerabilities': typeof AuthenticatedVulnerabilitiesRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/components': typeof AuthenticatedComponentsRoute
   '/_authenticated/datasets': typeof AuthenticatedDatasetsRoute
+  '/_authenticated/executive': typeof AuthenticatedExecutiveRoute
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/sbom': typeof AuthenticatedSbomRoute
   '/_authenticated/vulnerabilities': typeof AuthenticatedVulnerabilitiesRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/components'
     | '/datasets'
+    | '/executive'
     | '/reports'
     | '/sbom'
     | '/vulnerabilities'
@@ -113,6 +123,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/components'
     | '/datasets'
+    | '/executive'
     | '/reports'
     | '/sbom'
     | '/vulnerabilities'
@@ -124,6 +135,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/components'
     | '/_authenticated/datasets'
+    | '/_authenticated/executive'
     | '/_authenticated/reports'
     | '/_authenticated/sbom'
     | '/_authenticated/vulnerabilities'
@@ -188,6 +200,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedReportsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/executive': {
+      id: '/_authenticated/executive'
+      path: '/executive'
+      fullPath: '/executive'
+      preLoaderRoute: typeof AuthenticatedExecutiveRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/datasets': {
       id: '/_authenticated/datasets'
       path: '/datasets'
@@ -208,6 +227,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedComponentsRoute: typeof AuthenticatedComponentsRoute
   AuthenticatedDatasetsRoute: typeof AuthenticatedDatasetsRoute
+  AuthenticatedExecutiveRoute: typeof AuthenticatedExecutiveRoute
   AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedSbomRoute: typeof AuthenticatedSbomRoute
   AuthenticatedVulnerabilitiesRoute: typeof AuthenticatedVulnerabilitiesRoute
@@ -217,6 +237,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedComponentsRoute: AuthenticatedComponentsRoute,
   AuthenticatedDatasetsRoute: AuthenticatedDatasetsRoute,
+  AuthenticatedExecutiveRoute: AuthenticatedExecutiveRoute,
   AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedSbomRoute: AuthenticatedSbomRoute,
   AuthenticatedVulnerabilitiesRoute: AuthenticatedVulnerabilitiesRoute,

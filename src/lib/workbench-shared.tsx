@@ -14,7 +14,7 @@ import {
   BarChart, Bar,
 } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
-import { isJsonFile, normalizeJsonSbom } from "@/lib/sbom-import";
+import { parseSbomText, normalizeTabularRows } from "@/lib/sbom-parse";
 import { buildReport, type AnalysisReport } from "@/lib/risk-intel";
 import { AnalysisReportCard } from "@/components/AnalysisReport";
 
@@ -26,7 +26,7 @@ import {
   FileSpreadsheet, Loader2, Search, AlertTriangle, AlertCircle, CheckCircle2,
   Info, X, Package, TrendingUp, TrendingDown, Activity, Bug, Download,
   Building2, Tag, Calendar, FileText, Copy, Edit3, ChevronRight, ChevronLeft, Layers,
-  GitBranch, Hash, Shield, FileBarChart, ExternalLink, ListChecks, Boxes,
+  GitBranch, Hash, Shield, FileBarChart, Landmark, ExternalLink, ListChecks, Boxes,
   LayoutDashboard, LogOut, ArrowRight,
 } from "lucide-react";
 
@@ -319,17 +319,21 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     try {
       let rows: Record<string, unknown>[] = [];
       let sheetCols: string[] = [];
-      if (isJsonFile(file.name)) {
-        const { rows: jr, columns: jc, format } = normalizeJsonSbom(await file.text());
+      const isSpreadsheet = /\.(xlsx|xls|csv)$/i.test(file.name);
+      if (!isSpreadsheet) {
+        const { rows: jr, columns: jc, format, notes } = parseSbomText(await file.text(), file.name);
         rows = jr; sheetCols = jc;
-        toast.info(`Detected ${format} document`);
+        toast.info(`Detected ${format} — ${jr.length} components extracted`);
+        notes.forEach((nt: string) => toast.message(nt));
       } else {
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array" });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-        sheetCols = Array.from(rows.reduce((a, r) => { Object.keys(r).forEach((k) => a.add(k)); return a; }, new Set<string>()));
+        const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+        const norm = normalizeTabularRows(raw, /\.csv$/i.test(file.name) ? "CSV" : "Excel");
+        rows = norm.rows; sheetCols = norm.columns;
       }
+
       if (!rows.length) { toast.error("No rows found in file"); return; }
 
 
@@ -494,6 +498,8 @@ const NAV_ITEMS = [
   { to: "/components", icon: Package, label: "Components" },
   { to: "/vulnerabilities", icon: ShieldAlert, label: "Vulnerabilities" },
   { to: "/reports", icon: FileBarChart, label: "Reports" },
+  { to: "/executive", icon: Landmark, label: "Executive Report" },
+
   { to: "/sbom", icon: FileSpreadsheet, label: "SBOM" },
   { to: "/datasets", icon: Database, label: "Datasets" },
 ] as const;
@@ -600,7 +606,7 @@ export function Header({ userEmail, onSignOut }: { userEmail?: string; onSignOut
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.json,.cdx,.spdx" className="hidden"
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.json,.cdx,.spdx,.xml,.rdf,.yaml,.yml,.txt,.pom,.mod,.lock,.list" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f, null); }} />
           {active && (
             <Button onClick={() => void downloadExcel()} variant="outline" size="sm" className="rounded-xl">
