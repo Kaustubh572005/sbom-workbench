@@ -319,17 +319,21 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     try {
       let rows: Record<string, unknown>[] = [];
       let sheetCols: string[] = [];
-      if (isJsonFile(file.name)) {
-        const { rows: jr, columns: jc, format } = normalizeJsonSbom(await file.text());
+      const isSpreadsheet = /\.(xlsx|xls|csv)$/i.test(file.name);
+      if (!isSpreadsheet) {
+        const { rows: jr, columns: jc, format, notes } = parseSbomText(await file.text(), file.name);
         rows = jr; sheetCols = jc;
-        toast.info(`Detected ${format} document`);
+        toast.info(`Detected ${format} — ${jr.length} components extracted`);
+        notes.forEach((nt) => toast.message(nt));
       } else {
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array" });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-        sheetCols = Array.from(rows.reduce((a, r) => { Object.keys(r).forEach((k) => a.add(k)); return a; }, new Set<string>()));
+        const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+        const norm = normalizeTabularRows(raw, /\.csv$/i.test(file.name) ? "CSV" : "Excel");
+        rows = norm.rows; sheetCols = norm.columns;
       }
+
       if (!rows.length) { toast.error("No rows found in file"); return; }
 
 
