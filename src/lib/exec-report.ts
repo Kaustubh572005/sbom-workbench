@@ -123,7 +123,7 @@ export function buildExecReport(dataset: string, risks: ComponentRisk[]): ExecRe
     .slice(0, 10)
     .map((r) => ({ cve: r.cve || `EST-${r.name.slice(0, 12).toUpperCase()}`, component: r.name, version: r.version, cvss: r.cvss, severity: r.severity, estimated: r.estimated }));
 
-  const loopholes: ExecReport["loopholes"] = [
+  const loopholes: ExecReport["loopholes"] = ([
     { title: "Components without an exact version", count: risks.filter((r) => !r.version).length, impact: "high", detail: "Advisory correlation is impossible without a pinned version — these are blind spots in the estate." },
     { title: "Components without PURL or CPE", count: risks.filter((r) => !r.purl && !r.cpe).length, impact: "high", detail: "Automated NVD/OSV matching cannot run; risk had to be estimated heuristically." },
     { title: "Undeclared supplier", count: risks.filter((r) => !r.supplier).length, impact: "medium", detail: "No vendor advisory channel can be monitored for these components." },
