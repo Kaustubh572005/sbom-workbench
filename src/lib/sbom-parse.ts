@@ -126,10 +126,11 @@ function fromCycloneDxJson(doc: Record<string, unknown>): Record<string, unknown
   const vulnByRef = new Map<string, { cve: string; sev: string; score: number }[]>();
   for (const v of arr<Record<string, unknown>>(doc.vulnerabilities)) {
     const ratings = arr<Record<string, unknown>>(v.ratings);
-    const best = ratings.reduce(
-      (a, r) => (Number(r.score) || 0) > a.score ? { score: Number(r.score) || 0, sev: S(r.severity) } : a,
+    const best = ratings.reduce<{ score: number; sev: string }>(
+      (a, r) => ((Number(r.score) || 0) > a.score ? { score: Number(r.score) || 0, sev: S(r.severity) } : a),
       { score: 0, sev: S(ratings[0]?.severity) },
     );
+
     for (const a of arr<Record<string, unknown>>(v.affects)) {
       const ref = S(a.ref);
       const list = vulnByRef.get(ref) ?? [];
