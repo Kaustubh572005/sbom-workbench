@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   Activity, AlertCircle, AlertTriangle, Boxes, Building2, Bug, Calendar,
   CheckCircle2, Gauge, Info, Package, RefreshCw, Satellite, Shield, ShieldAlert,
-  ShieldCheck, Sparkles, Wrench, XCircle,
+  ShieldCheck, Sparkles, Wrench, XCircle, LifeBuoy, ArrowUpCircle, HelpCircle, Replace,
 } from "lucide-react";
 import {
   useWorkbench, ActiveFilterChip, SearchBar, NoDataset, severityConfig,
@@ -13,6 +13,9 @@ import {
 } from "@/lib/workbench-shared";
 import type { SeverityKey } from "@/lib/workbench-shared";
 import { buildVulnIntel, intelKey, type Enrichment, type GroupRisk, type VulnRecord } from "@/lib/vuln-intel";
+import {
+  lifecycleTone, supportTone, remediationTone, priorityTone, confidenceTone,
+} from "@/lib/lifecycle-intel";
 import { enrichThreatIntel } from "@/lib/threat-intel.functions";
 import { DataTable, type Col } from "@/components/VulnTable";
 import { Button } from "@/components/ui/button";
@@ -34,13 +37,15 @@ export const Route = createFileRoute("/_authenticated/vulnerabilities")({
 
 type Facet =
   | "all" | "critical" | "high" | "medium" | "low" | "info"
-  | "kev" | "exploit" | "fix" | "nofix" | "eol" | "apps" | "vendors" | "components" | "compliance";
+  | "kev" | "exploit" | "eol" | "apps" | "vendors" | "components" | "compliance"
+  | "unsupported" | "upgrade" | "migration" | "validation" | "update" | "uptodate" | "unknownLifecycle";
 
 type Section =
-  | "all" | "criticalCves" | "highest" | "apps" | "vendors" | "eol" | "compliance" | "loopholes";
+  | "all" | "lifecycle" | "criticalCves" | "highest" | "apps" | "vendors" | "eol" | "compliance" | "loopholes";
 
 const SECTIONS: Array<{ key: Section; label: string; icon: typeof Shield }> = [
   { key: "all", label: "All findings", icon: ShieldAlert },
+  { key: "lifecycle", label: "Lifecycle & remediation", icon: LifeBuoy },
   { key: "criticalCves", label: "Critical CVEs", icon: AlertTriangle },
   { key: "highest", label: "Highest CVEs", icon: Activity },
   { key: "apps", label: "Applications at risk", icon: Boxes },
@@ -53,6 +58,12 @@ const SECTIONS: Array<{ key: Section; label: string; icon: typeof Shield }> = [
 function SevChip({ sev }: { sev: SeverityKey }) {
   const cfg = severityConfig[sev];
   return <span className={`chip border ${cfg.bg} ${cfg.border} ${cfg.color}`}>{cfg.label}</span>;
+}
+
+type Tone = SeverityKey;
+function Badge({ text, tone }: { text: string; tone: Tone }) {
+  const cfg = severityConfig[tone];
+  return <span className={`chip whitespace-nowrap border ${cfg.bg} ${cfg.border} ${cfg.color}`}>{text}</span>;
 }
 
 function ScoreTile({ label, value, sub, tone, icon: Icon }: { label: string; value: number | string; sub: string; tone: SeverityKey | "primary"; icon: typeof Gauge }) {
@@ -162,10 +173,15 @@ function VulnPage() {
       case "info": return intel.records.filter((r) => r.severity === "info");
       case "kev": return intel.kevRecords;
       case "exploit": return intel.activeExploits;
-      case "fix": return intel.withFix;
-      case "nofix": return intel.withoutFix;
       case "eol": return intel.eolRecords;
-      case "compliance": return intel.withoutFix.concat(intel.eolRecords, intel.missingLicense);
+      case "unsupported": return intel.unsupportedRecords;
+      case "upgrade": return intel.upgradeRequired;
+      case "migration": return intel.migrationRequired;
+      case "validation": return intel.validationRequired;
+      case "update": return intel.updateAvailable;
+      case "uptodate": return intel.upToDate;
+      case "unknownLifecycle": return intel.unknownLifecycle;
+      case "compliance": return intel.unsupportedRecords.concat(intel.validationRequired, intel.missingLicense);
       default: return intel.records;
     }
   };
@@ -186,12 +202,58 @@ function VulnPage() {
     { key: "components", label: "Components at risk", value: intel.componentsAtRisk.length, tone: "medium", icon: Package },
     { key: "eol", label: "End of life", value: intel.eolRecords.length, tone: "critical", icon: Calendar },
     { key: "compliance", label: "Compliance issues", value: intel.complianceIssues, tone: "high", icon: ShieldCheck },
-    { key: "fix", label: "Fix available", value: intel.withFix.length, tone: "low", icon: Wrench },
-    { key: "nofix", label: "Without fix", value: intel.withoutFix.length, tone: "critical", icon: XCircle },
+    { key: "unsupported", label: "Unsupported / legacy", value: intel.unsupportedRecords.length, tone: "critical", icon: XCircle },
+    { key: "upgrade", label: "Upgrade required", value: intel.upgradeRequired.length, tone: "critical", icon: ArrowUpCircle },
+    { key: "migration", label: "Platform migration", value: intel.migrationRequired.length, tone: "high", icon: Replace },
+    { key: "update", label: "Update available", value: intel.updateAvailable.length, tone: "medium", icon: Wrench },
+    { key: "uptodate", label: "Up to date", value: intel.upToDate.length, tone: "low", icon: CheckCircle2 },
+    { key: "validation", label: "Vendor validation", value: intel.validationRequired.length, tone: "info", icon: HelpCircle },
+    { key: "unknownLifecycle", label: "Lifecycle unknown", value: intel.unknownLifecycle.length, tone: "info", icon: HelpCircle },
     { key: "exploit", label: "Active exploits", value: intel.activeExploits.length, tone: "critical", icon: Bug, glow: intel.activeExploits.length > 0 },
   ];
 
   /* ---------------------------------- columns --------------------------------- */
+  const lifecycleColumns: Col<VulnRecord>[] = [
+    { key: "component", label: "Component", value: (r) => r.component || "—", filterable: true },
+    { key: "version", label: "Current version", value: (r) => r.version, mono: true, filterable: true },
+    {
+      key: "latestStable", label: "Latest stable version", value: (r) => r.lifecycle.latestStableVersion,
+      mono: true,
+      render: (r) => r.lifecycle.latestStableVersion
+        ? <Badge text={r.lifecycle.latestStableVersion} tone="info" />
+        : <span className="text-muted-foreground">Unconfirmed</span>,
+    },
+    {
+      key: "lifecycleStatus", label: "Lifecycle status", value: (r) => r.lifecycle.lifecycleStatus, filterable: true,
+      render: (r) => <Badge text={r.lifecycle.lifecycleStatus} tone={lifecycleTone[r.lifecycle.lifecycleStatus]} />,
+    },
+    {
+      key: "supportStatus", label: "Support status", value: (r) => r.lifecycle.supportStatus, filterable: true,
+      render: (r) => <Badge text={r.lifecycle.supportStatus} tone={supportTone[r.lifecycle.supportStatus]} />,
+    },
+    {
+      key: "remediationStatus", label: "Remediation status", value: (r) => r.lifecycle.remediationStatus, filterable: true,
+      render: (r) => <Badge text={r.lifecycle.remediationStatus} tone={remediationTone[r.lifecycle.remediationStatus]} />,
+    },
+    { key: "recommendedAction", label: "Recommended action", value: (r) => r.lifecycle.recommendedAction, width: "22rem" },
+    {
+      key: "targetVersion", label: "Target version", value: (r) => r.lifecycle.targetVersion, mono: true,
+      render: (r) => r.lifecycle.targetVersion ? <span className="font-mono text-xs">{r.lifecycle.targetVersion}</span> : <span className="text-muted-foreground">—</span>,
+    },
+    {
+      key: "priority", label: "Priority", value: (r) => r.lifecycle.priority, filterable: true,
+      render: (r) => <Badge text={r.lifecycle.priority} tone={priorityTone[r.lifecycle.priority]} />,
+    },
+    {
+      key: "confidence", label: "Confidence", value: (r) => r.lifecycle.confidence, filterable: true,
+      render: (r) => <Badge text={`${r.lifecycle.confidence} · ${r.lifecycle.confidenceScore}%`} tone={confidenceTone[r.lifecycle.confidence]} />,
+    },
+    {
+      key: "evidenceSource", label: "Evidence source", value: (r) => r.lifecycle.evidenceSource, filterable: true,
+      render: (r) => <Badge text={r.lifecycle.evidenceSource} tone={r.lifecycle.evidenceSource === "Estimated Analysis" ? "medium" : "info"} />,
+    },
+  ];
+
   const recordCols: Col<VulnRecord>[] = [
     { key: "component", label: "Component", value: (r) => r.component || "—", filterable: true },
     { key: "application", label: "Application", value: (r) => r.application, filterable: true },
@@ -201,12 +263,7 @@ function VulnPage() {
     { key: "cvss", label: "CVSS", value: (r) => r.cvss, align: "right", mono: true },
     { key: "published", label: "Published", value: (r) => r.published },
     { key: "severity", label: "Severity", value: (r) => r.severity, render: (r) => <SevChip sev={r.severity} />, filterable: true },
-    {
-      key: "fixAvailable", label: "Fix available", value: (r) => (r.fixAvailable ? r.latestSafeVersion || "Yes" : "No"),
-      render: (r) => r.fixAvailable
-        ? <span className="chip border border-severity-low/40 bg-severity-low/15 text-severity-low">{r.latestSafeVersion || "Yes"}</span>
-        : <span className="chip border border-severity-critical/40 bg-severity-critical/15 text-severity-critical">No</span>,
-    },
+    ...lifecycleColumns.filter((c) => c.key !== "component" && c.key !== "version"),
     {
       key: "exploitStatus", label: "Exploit status", value: (r) => r.exploitStatus,
       render: (r) => r.kev
@@ -229,22 +286,28 @@ function VulnPage() {
   ];
 
   const eolCols: Col<VulnRecord>[] = [
-    { key: "component", label: "Component", value: (r) => r.component || "—", filterable: true },
-    { key: "version", label: "Current version", value: (r) => r.version, mono: true },
-    { key: "latest", label: "Latest version", value: (r) => r.intel.latestVersion ?? "", mono: true, render: (r) => r.intel.latestVersion ? <span className="chip border border-severity-info/40 bg-severity-info/15 text-severity-info">{r.intel.latestVersion}</span> : <span className="text-muted-foreground">—</span> },
+    ...lifecycleColumns,
     { key: "eolDate", label: "End of life", value: (r) => r.intel.eolDate ?? "" },
     { key: "supportEnd", label: "End of support", value: (r) => r.intel.supportEndDate ?? "" },
-    { key: "replacement", label: "Replacement recommendation", value: (r) => (r.intel.latestVersion ? `Migrate to ${r.component} ${r.intel.latestVersion}` : `Select a supported alternative to ${r.component}`) },
-    { key: "upgrade", label: "Upgrade recommendation", value: (r) => r.upgradeRecommendation },
+    { key: "why", label: "Analysis rationale", value: (r) => r.lifecycle.reason },
   ];
 
   const expandRecord = (r: VulnRecord) => (
     <div className="grid gap-3 text-xs md:grid-cols-2">
       <div className="space-y-1.5">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Smart fix recommendation</div>
-        <div><span className="font-semibold">Fix available:</span> {r.fixAvailable ? "Yes" : "No"}</div>
-        <div><span className="font-semibold">Fixed version:</span> {r.fixedVersion || "—"}</div>
-        <div><span className="font-semibold">Latest safe version:</span> {r.latestSafeVersion || "—"}</div>
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Lifecycle & remediation analysis</div>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge text={r.lifecycle.lifecycleStatus} tone={lifecycleTone[r.lifecycle.lifecycleStatus]} />
+          <Badge text={r.lifecycle.supportStatus} tone={supportTone[r.lifecycle.supportStatus]} />
+          <Badge text={r.lifecycle.remediationStatus} tone={remediationTone[r.lifecycle.remediationStatus]} />
+          <Badge text={`Priority ${r.lifecycle.priority}`} tone={priorityTone[r.lifecycle.priority]} />
+          <Badge text={`Confidence ${r.lifecycle.confidence} (${r.lifecycle.confidenceScore}%)`} tone={confidenceTone[r.lifecycle.confidence]} />
+        </div>
+        <div><span className="font-semibold">Recommended action:</span> {r.lifecycle.recommendedAction}</div>
+        <div><span className="font-semibold">Latest stable version:</span> {r.lifecycle.latestStableVersion || "Unconfirmed"}</div>
+        <div><span className="font-semibold">Target version:</span> {r.lifecycle.targetVersion || "—"}</div>
+        <div><span className="font-semibold">Evidence source:</span> {r.lifecycle.evidenceSource} — {r.lifecycle.evidenceDetail}</div>
+        <div><span className="font-semibold">Why this classification:</span> {r.lifecycle.reason}</div>
         <div><span className="font-semibold">Patch priority:</span> {r.patchPriority}</div>
         <div><span className="font-semibold">Remediation steps:</span> {r.remediation}</div>
         <div><span className="font-semibold">Upgrade recommendation:</span> {r.upgradeRecommendation}</div>
@@ -270,7 +333,7 @@ function VulnPage() {
             <Sparkles className="mr-1 h-3 w-3" /> Why is this critical?
           </Button>
           <Button size="sm" variant="outline" className="h-7 rounded-lg text-[11px]"
-            onClick={() => askAnalyst(`Generate step-by-step remediation and mitigation for ${r.component} ${r.version} (${r.cve || "no CVE id"}), including fixed version, vendor advisory guidance and compensating controls.`)}>
+            onClick={() => askAnalyst(`Lifecycle status is ${r.lifecycle.lifecycleStatus}, support status ${r.lifecycle.supportStatus}, remediation status ${r.lifecycle.remediationStatus}. Generate step-by-step remediation and mitigation for ${r.component} ${r.version} (${r.cve || "no CVE id"}), including fixed version, vendor advisory guidance and compensating controls.`)}>
             <Wrench className="mr-1 h-3 w-3" /> How do I fix this?
           </Button>
           <Button size="sm" variant="outline" className="h-7 rounded-lg text-[11px]" onClick={() => setDrawerId(r.id)}>
@@ -371,6 +434,38 @@ function VulnPage() {
       {section === "all" && (
         <DataTable title="All vulnerability findings" subtitle={facet === "all" ? "Full analysed scope" : `Facet: ${facet}`}
           columns={recordCols} rows={scoped} getKey={(r) => r.id} onOpen={(r) => setDrawerId(r.id)} expand={expandRecord} />
+      )}
+
+      {section === "lifecycle" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+            {(Object.entries(intel.lifecycleCounts) as Array<[keyof typeof intel.lifecycleCounts, number]>).map(([status, count]) => {
+              const cfg = severityConfig[lifecycleTone[status]];
+              return (
+                <div key={status} className={`card-elevated border p-3 ${cfg.border}`}>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{status}</div>
+                  <div className={`mt-1 text-xl font-bold ${cfg.color}`}>{count.toLocaleString()}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+            {(Object.entries(intel.remediationCounts) as Array<[keyof typeof intel.remediationCounts, number]>).map(([status, count]) => {
+              const cfg = severityConfig[remediationTone[status]];
+              return (
+                <div key={status} className={`card-elevated border p-3 ${cfg.border}`}>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{status}</div>
+                  <div className={`mt-1 text-xl font-bold ${cfg.color}`}>{count.toLocaleString()}</div>
+                </div>
+              );
+            })}
+          </div>
+          <DataTable title="Lifecycle & remediation analysis"
+            subtitle="Vendor lifecycle, support state, remediation path, priority, confidence and evidence source for every component"
+            columns={lifecycleColumns} rows={scoped} getKey={(r) => r.id}
+            onOpen={(r) => setDrawerId(r.id)} expand={expandRecord}
+            actions={askSection("Remediation roadmap", "Using the lifecycle and remediation analysis, build a prioritised remediation roadmap: which components need upgrades, which need platform migration, and which need vendor validation.")} />
+        </div>
       )}
 
       {section === "criticalCves" && (
