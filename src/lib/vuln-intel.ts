@@ -7,6 +7,10 @@
  */
 
 import { factsOf, sevOf, type SevKey } from "@/lib/risk-intel";
+import {
+  assessLifecycle, LIFECYCLE_STATUSES, REMEDIATION_STATUSES,
+  type LifecycleAssessment, type LifecycleStatus, type RemediationStatus,
+} from "@/lib/lifecycle-intel";
 
 export type Row = Record<string, unknown>;
 
@@ -53,6 +57,8 @@ export type VulnRecord = {
   riskReduction: number;
   exploitStatus: string;
   blob: string;
+  /** lifecycle & remediation intelligence (replaces the old fix/no-fix model) */
+  lifecycle: LifecycleAssessment;
 };
 
 const pick = (row: Row, names: string[]): string => {
@@ -112,6 +118,28 @@ export function toVulnRecord(id: string, raw: Row, intel: Enrichment = {}): Vuln
 
   const exploitStatus = kev ? "KEV — actively exploited" : exploit ? "Public exploit" : f.cvss >= 9 ? "High likelihood" : "No known exploit";
 
+  const lifecycle = assessLifecycle({
+    component: f.component,
+    version: f.version,
+    vendor: f.vendor,
+    severity: sev,
+    cvss: f.cvss,
+    kev,
+    exploit,
+    uploadedFix: f.fix,
+    uploadedEol: f.eol,
+    uploadedStatus: `${f.status} ${f.blob.slice(0, 400)}`,
+    intel: {
+      latestVersion: intel.latestVersion,
+      fixedVersion: intel.fixedVersion,
+      eolDate: intel.eolDate,
+      supportEndDate: intel.supportEndDate,
+      advisoryIds: intel.advisoryIds,
+      source: intel.source,
+      updatedAt: intel.updatedAt,
+    },
+  });
+
   return {
     id,
     raw,
@@ -141,6 +169,7 @@ export function toVulnRecord(id: string, raw: Row, intel: Enrichment = {}): Vuln
     riskReduction: Math.round(riskScore * (fixAvailable ? 0.9 : 0.35)),
     exploitStatus,
     blob: f.blob,
+    lifecycle,
   };
 }
 
@@ -188,6 +217,18 @@ export type VulnIntel = {
   multiCve: GroupRisk[];
   withFix: VulnRecord[];
   withoutFix: VulnRecord[];
+  /* lifecycle & remediation model */
+  lifecycleCounts: Record<LifecycleStatus, number>;
+  remediationCounts: Record<RemediationStatus, number>;
+  unsupportedRecords: VulnRecord[];
+  upgradeRequired: VulnRecord[];
+  migrationRequired: VulnRecord[];
+  validationRequired: VulnRecord[];
+  updateAvailable: VulnRecord[];
+  upToDate: VulnRecord[];
+  unknownLifecycle: VulnRecord[];
+  criticalPriority: VulnRecord[];
+  lowConfidence: VulnRecord[];
   activeExploits: VulnRecord[];
   kevRecords: VulnRecord[];
   eolRecords: VulnRecord[];
@@ -277,6 +318,22 @@ export function buildVulnIntel(
 
   const withFix = records.filter((r) => r.fixAvailable);
   const withoutFix = records.filter((r) => !r.fixAvailable);
+
+  const lifecycleCounts = Object.fromEntries(LIFECYCLE_STATUSES.map((s) => [s, 0])) as Record<LifecycleStatus, number>;
+  const remediationCounts = Object.fromEntries(REMEDIATION_STATUSES.map((s) => [s, 0])) as Record<RemediationStatus, number>;
+  for (const r of records) {
+    lifecycleCounts[r.lifecycle.lifecycleStatus]++;
+    remediationCounts[r.lifecycle.remediationStatus]++;
+  }
+  const unsupportedRecords = records.filter((r) => r.lifecycle.supportStatus === "Unsupported" || r.lifecycle.supportStatus === "Legacy Platform");
+  const upgradeRequired = records.filter((r) => r.lifecycle.remediationStatus === "Upgrade Required");
+  const migrationRequired = records.filter((r) => r.lifecycle.remediationStatus === "Platform Migration Required");
+  const validationRequired = records.filter((r) => r.lifecycle.remediationStatus === "Vendor Validation Required" || r.lifecycle.remediationStatus === "Manual Review Required");
+  const updateAvailable = records.filter((r) => r.lifecycle.remediationStatus === "Update Available");
+  const upToDate = records.filter((r) => r.lifecycle.remediationStatus === "Up To Date");
+  const unknownLifecycle = records.filter((r) => r.lifecycle.lifecycleStatus === "Unknown (Requires Validation)");
+  const criticalPriority = records.filter((r) => r.lifecycle.priority === "Critical");
+  const lowConfidence = records.filter((r) => r.lifecycle.confidence === "Low");
   const kevRecords = records.filter((r) => r.kev);
   const activeExploits = records.filter((r) => r.exploit || r.kev);
   const eolRecords = records.filter((r) => r.eol);
@@ -317,7 +374,7 @@ export function buildVulnIntel(
   );
 
   const dependencyRisk = pct(records.filter((r) => /dependency|transitive|indirect/.test(r.blob)).length || multiCve.length);
-  const supplyChainRisk = Math.min(100, Math.round(pct(missingSupplier.length) * 0.5 + pct(eolRecords.length) * 0.5));
+  const supplyChainRisk = Math.min(100, Math.round(pct(missingSupplier.length) * 0.5 + pct(unsupportedRecords.length) * 0.5));
   const openSourceRisk = Math.min(100, Math.round(pct(gplRecords.length) * 0.5 + pct(missingLicense.length) * 0.5));
   const thirdPartyRisk = Math.min(100, Math.round(pct(records.filter((r) => r.vendor).length ? vendorsAtRisk.filter((v) => v.critical > 0).length * 10 : 0)));
 
@@ -340,19 +397,19 @@ export function buildVulnIntel(
     },
     {
       framework: "Internal Policy",
-      control: "No end-of-life software in production",
+      control: "No end-of-life or unsupported software in production",
       requirement: "Unsupported / EOL components must be replaced or granted a documented exception.",
-      status: eolRecords.length > 0 ? "Violation" : "Pass",
-      affected: eolRecords.length,
-      detail: `${eolRecords.length} EOL / unsupported components detected.`,
+      status: unsupportedRecords.length > 0 ? "Violation" : "Pass",
+      affected: unsupportedRecords.length,
+      detail: `${unsupportedRecords.length} components classified Unsupported / Legacy Platform by lifecycle analysis.`,
     },
     {
       framework: "Internal Policy",
       control: "Remediation ownership",
-      requirement: "Every High+ finding must carry a documented fix or remediation owner.",
-      status: withoutFix.filter((r) => r.severity === "critical" || r.severity === "high").length ? "Violation" : "Pass",
-      affected: withoutFix.filter((r) => r.severity === "critical" || r.severity === "high").length,
-      detail: "High-severity findings without a documented fix version.",
+      requirement: "Every High+ finding must carry a lifecycle classification and remediation path.",
+      status: validationRequired.filter((r) => r.severity === "critical" || r.severity === "high").length ? "Violation" : "Pass",
+      affected: validationRequired.filter((r) => r.severity === "critical" || r.severity === "high").length,
+      detail: "High-severity findings whose lifecycle could not be confirmed and require vendor validation.",
     },
     {
       framework: "License",
@@ -365,8 +422,10 @@ export function buildVulnIntel(
   ];
 
   const loopholes: Loophole[] = ([
-    { category: "Unpatched components", affected: withoutFix.length, severity: "critical", detail: "No fix version or remediation documented." },
-    { category: "Unsupported / EOL software", affected: eolRecords.length, severity: "critical", detail: "Will never receive future security fixes." },
+    { category: "Upgrade required", affected: upgradeRequired.length, severity: "critical", detail: "Components running past-support release lines that must be upgraded." },
+    { category: "Unsupported / EOL software", affected: unsupportedRecords.length, severity: "critical", detail: "Vendor no longer ships security fixes for these release lines." },
+    { category: "Platform migration required", affected: migrationRequired.length, severity: "high", detail: "Legacy platforms that cannot be patched — migration is the only remediation." },
+    { category: "Lifecycle unconfirmed", affected: unknownLifecycle.length, severity: "medium", detail: "No authoritative lifecycle source matched — requires vendor validation." },
     { category: "Missing supplier information", affected: missingSupplier.length, severity: "high", detail: "Provenance cannot be verified — supply-chain blind spot." },
     { category: "Missing version information", affected: missingVersion.length, severity: "high", detail: "Vulnerability matching is unreliable without versions." },
     { category: "Weak dependency chains", affected: multiCve.length, severity: "high", detail: "Components appearing repeatedly across applications amplify blast radius." },
@@ -405,6 +464,17 @@ export function buildVulnIntel(
     multiCve,
     withFix,
     withoutFix,
+    lifecycleCounts,
+    remediationCounts,
+    unsupportedRecords,
+    upgradeRequired,
+    migrationRequired,
+    validationRequired,
+    updateAvailable,
+    upToDate,
+    unknownLifecycle,
+    criticalPriority,
+    lowConfidence,
     activeExploits,
     kevRecords,
     eolRecords,
