@@ -17,6 +17,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { parseSbomText, normalizeTabularRows } from "@/lib/sbom-parse";
 import { buildReport, type AnalysisReport } from "@/lib/risk-intel";
 import { AnalysisReportCard } from "@/components/AnalysisReport";
+import {
+  buildPlatformAnalysis, kpiPredicate,
+  type ComponentProfile, type KpiId, type PlatformAnalysis,
+} from "@/lib/platform-intel";
+import {
+  exportCsv, exportJson, exportXlsx, inventorySheet, analysisSheets,
+  type Sheet,
+} from "@/lib/export-analysis";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +36,7 @@ import {
   Building2, Tag, Calendar, FileText, Copy, Edit3, ChevronRight, ChevronLeft, Layers,
   GitBranch, Hash, Shield, FileBarChart, Landmark, ExternalLink, ListChecks, Boxes,
   LayoutDashboard, LogOut, ArrowRight,
+  Scale, Network, GitCompare,
 } from "lucide-react";
 
 /* ============================== Types & helpers ============================== */
@@ -202,7 +211,29 @@ type WorkbenchCtx = {
   refresh: () => Promise<void>;
   aiMinimized: boolean;
   setAiMinimized: (v: boolean) => void;
+  /* --- V2: platform intelligence --- */
+  analysis: PlatformAnalysis;
+  profileById: Record<string, ComponentProfile>;
+  kpiFilter: KpiId | null;
+  setKpiFilter: (k: KpiId | null) => void;
+  handleFiles: (files: File[], targetDatasetId: string | null) => Promise<void>;
+  uploadProgress: { current: number; total: number; name: string } | null;
+  uploadHistory: UploadEntry[];
+  exportAnalysis: (fmt: "xlsx" | "csv" | "json") => Promise<void>;
+  exportSection: (name: string, sheet: Sheet, fmt: "xlsx" | "csv" | "json") => Promise<void>;
 };
+
+export type UploadEntry = {
+  id: string;
+  filename: string;
+  datasetName: string;
+  datasetId: string;
+  rows: number;
+  format: string;
+  at: string;
+  action: "created" | "appended";
+};
+
 
 const WorkbenchContext = createContext<WorkbenchCtx | null>(null);
 export const useWorkbench = () => {
@@ -225,24 +256,52 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const [aiMinimized, setAiMinimized] = useState(() => {
     try { return localStorage.getItem("sbom:aiMinimized") === "1"; } catch { return false; }
   });
+  const [kpiFilter, setKpiFilter] = useState<KpiId | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; name: string } | null>(null);
+  const [uploadHistory, setUploadHistory] = useState<UploadEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("sbom:uploadHistory");
+      if (raw) setUploadHistory(JSON.parse(raw) as UploadEntry[]);
+    } catch { /* noop */ }
+  }, []);
+
+  const recordUpload = useCallback((entry: UploadEntry) => {
+    setUploadHistory((prev) => {
+      const next = [entry, ...prev].slice(0, 200);
+      try { localStorage.setItem("sbom:uploadHistory", JSON.stringify(next)); } catch { /* noop */ }
+      return next;
+    });
+  }, []);
+
 
   const active = datasets.find((d) => d.id === activeId) ?? null;
   const severityCol = active ? detectSeverityColumn(active.columns) : null;
 
-  const severityCounts = useMemo(() => {
-    const counts: Record<SeverityKey, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0, none: 0 };
-    if (!severityCol) return counts;
-    for (const c of components) counts[getSeverityLevel(c.data[severityCol])]++;
-    return counts;
-  }, [components, severityCol]);
+  /* ---- V2: automatic platform-wide analysis of every uploaded dataset ---- */
+  const analysis = useMemo(
+    () => buildPlatformAnalysis(components.map((c) => ({ id: c.id, data: c.data }))),
+    [components],
+  );
+  const profileById = useMemo(
+    () => Object.fromEntries(analysis.profiles.map((p) => [p.id, p])) as Record<string, ComponentProfile>,
+    [analysis],
+  );
 
-  const riskScore = useMemo(() => {
-    const total = components.length || 1;
-    const w = severityCounts.critical * 10 + severityCounts.high * 7 + severityCounts.medium * 4 + severityCounts.low * 1;
-    return Math.min(100, Math.round((w / (total * 10)) * 100));
-  }, [components.length, severityCounts]);
+  const severityCounts = useMemo<Record<SeverityKey, number>>(() => ({
+    critical: analysis.counts.critical,
+    high: analysis.counts.high,
+    medium: analysis.counts.medium,
+    low: analysis.counts.low,
+    info: analysis.profiles.filter((p) => p.severity === "info").length,
+    none: analysis.profiles.filter((p) => p.severity === "none").length,
+  }), [analysis]);
+
+  const riskScore = analysis.overallRisk;
+
 
   const riskBand: WorkbenchCtx["riskBand"] =
     riskScore >= 75 ? { label: "CRITICAL", color: "text-severity-critical", desc: "Immediate action required", tone: "critical" } :
@@ -250,17 +309,26 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     riskScore >= 25 ? { label: "MODERATE", color: "text-severity-medium", desc: "Monitor closely", tone: "medium" } :
     { label: "HEALTHY", color: "text-severity-low", desc: "Posture is healthy", tone: "low" };
 
+
+
+
   const filteredComponents = useMemo(() => {
     let list = components;
-    if (severityFilter !== "all" && severityCol) {
-      list = list.filter((c) => getSeverityLevel(c.data[severityCol]) === severityFilter);
+    if (kpiFilter && kpiFilter !== "all") {
+      const pred = kpiPredicate(kpiFilter, analysis);
+      const ok = new Set(analysis.profiles.filter(pred).map((p) => p.id));
+      list = list.filter((c) => ok.has(c.id));
+    }
+    if (severityFilter !== "all") {
+      list = list.filter((c) => (profileById[c.id]?.severity ?? "none") === severityFilter);
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((c) => Object.values(c.data).some((v) => String(v).toLowerCase().includes(q)));
     }
     return list;
-  }, [components, searchQuery, severityFilter, severityCol]);
+  }, [components, searchQuery, severityFilter, kpiFilter, analysis, profileById]);
+
 
   const refresh = useCallback(async () => {
     const { data, error } = await supabase.from("datasets").select("*").order("created_at", { ascending: false });
@@ -319,31 +387,49 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     try {
       let rows: Record<string, unknown>[] = [];
       let sheetCols: string[] = [];
+      let format = "Tabular";
       const isSpreadsheet = /\.(xlsx|xls|csv)$/i.test(file.name);
       if (!isSpreadsheet) {
-        const { rows: jr, columns: jc, format, notes } = parseSbomText(await file.text(), file.name);
-        rows = jr; sheetCols = jc;
-        toast.info(`Detected ${format} — ${jr.length} components extracted`);
-        notes.forEach((nt: string) => toast.message(nt));
+        const parsed = parseSbomText(await file.text(), file.name);
+        rows = parsed.rows; sheetCols = parsed.columns; format = parsed.format;
+        toast.info(`Detected ${parsed.format} — ${parsed.rows.length} components extracted`);
+        parsed.notes.forEach((nt: string) => toast.message(nt));
       } else {
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array" });
+        format = /\.csv$/i.test(file.name) ? "CSV" : "Excel";
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-        const norm = normalizeTabularRows(raw, /\.csv$/i.test(file.name) ? "CSV" : "Excel");
+        const norm = normalizeTabularRows(raw, format);
         rows = norm.rows; sheetCols = norm.columns;
       }
 
-      if (!rows.length) { toast.error("No rows found in file"); return; }
+      if (!rows.length) { toast.error(`No components found in ${file.name}`); return; }
 
+      // duplicate detection inside the uploaded file itself
+      const seen = new Set<string>();
+      const unique: Record<string, unknown>[] = [];
+      let dupes = 0;
+      for (const r of rows) {
+        const k = JSON.stringify(r);
+        if (seen.has(k)) { dupes++; continue; }
+        seen.add(k);
+        unique.push(r);
+      }
+      rows = unique;
+      if (dupes) toast.message(`${dupes} duplicate row(s) skipped in ${file.name}`);
 
       let datasetId = targetDatasetId;
+      let action: UploadEntry["action"] = "appended";
+      let datasetName = datasets.find((d) => d.id === targetDatasetId)?.name ?? "";
       if (!datasetId) {
+        datasetName = file.name.replace(/\.[^.]+$/, "");
         const { data, error } = await supabase.from("datasets").insert({
-          name: file.name.replace(/\.[^.]+$/, ""), source_filename: file.name, columns: sheetCols,
+          name: datasetName, source_filename: file.name, columns: sheetCols,
         }).select().single();
         if (error) throw error;
         datasetId = (data as { id: string }).id;
+        action = "created";
       } else {
         const ds = datasets.find((d) => d.id === datasetId);
         const merged = Array.from(new Set([...(ds?.columns ?? []), ...sheetCols]));
@@ -352,8 +438,12 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       const toInsert = await Promise.all(rows.map(async (r) => ({
         dataset_id: datasetId!, data: r as never, content_hash: await hashString(JSON.stringify(r)),
       })));
-      const { error: insErr } = await supabase.from("components").upsert(toInsert, { onConflict: "dataset_id,content_hash", ignoreDuplicates: true });
-      if (insErr) throw insErr;
+      // chunk the write so very large SBOMs stay within request limits
+      for (let i = 0; i < toInsert.length; i += 500) {
+        const { error: insErr } = await supabase.from("components")
+          .upsert(toInsert.slice(i, i + 500), { onConflict: "dataset_id,content_hash", ignoreDuplicates: true });
+        if (insErr) throw insErr;
+      }
 
       const [{ data: dsAll }, { data: comp }] = await Promise.all([
         supabase.from("datasets").select("*").order("created_at", { ascending: false }),
@@ -363,14 +453,36 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       setComponents(((comp ?? []) as unknown) as Component[]);
       setActiveId(datasetId);
       setLastScan(new Date());
-      toast.success(`Imported ${rows.length} rows from ${file.name}`);
+      recordUpload({
+        id: `${Date.now()}-${file.name}`,
+        filename: file.name,
+        datasetName: datasetName || file.name,
+        datasetId: datasetId!,
+        rows: rows.length,
+        format,
+        at: new Date().toISOString(),
+        action,
+      });
+      toast.success(`Imported ${rows.length} components from ${file.name}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [datasets]);
+  }, [datasets, recordUpload]);
+
+  const handleFiles = useCallback(async (files: File[], targetDatasetId: string | null) => {
+    const list = files.filter(Boolean);
+    if (!list.length) return;
+    for (let i = 0; i < list.length; i++) {
+      setUploadProgress({ current: i + 1, total: list.length, name: list[i].name });
+      // first file may create the dataset; the rest append to the same one
+      await handleFile(list[i], i === 0 ? targetDatasetId : null);
+    }
+    setUploadProgress(null);
+  }, [handleFile]);
+
 
   const updateCell = useCallback(async (rowId: string, col: string, value: string) => {
     const row = components.find((c) => c.id === rowId);
@@ -482,27 +594,57 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     }
   }, [active, components, severityCol]);
 
+  const exportAnalysis = useCallback(async (fmt: "xlsx" | "csv" | "json") => {
+    if (!active) { toast.error("No dataset selected"); return; }
+    try {
+      const inv = inventorySheet(active.name, active.columns, analysis.profiles);
+      const base = `${active.name}-analysis`;
+      if (fmt === "csv") exportCsv(inv, base);
+      else if (fmt === "json") exportJson({ dataset: active.name, generatedAt: new Date().toISOString(), analysis }, base);
+      else await exportXlsx([inv, ...analysisSheets(analysis)], base);
+      toast.success(`${fmt.toUpperCase()} export ready`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
+    }
+  }, [active, analysis]);
+
+  const exportSection = useCallback(async (name: string, sheet: Sheet, fmt: "xlsx" | "csv" | "json") => {
+    try {
+      const base = `${active?.name ?? "sbom"}-${name}`;
+      if (fmt === "csv") exportCsv(sheet, base);
+      else if (fmt === "json") exportJson(sheet.rows.map((r) => Object.fromEntries(sheet.columns.map((c, i) => [c, r[i]]))), base);
+      else await exportXlsx([sheet], base);
+      toast.success(`${name} exported`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
+    }
+  }, [active]);
+
   const value: WorkbenchCtx = {
     datasets, active, activeId, setActiveId, components, loading, uploading,
     searchQuery, setSearchQuery, severityFilter, setSeverityFilter, drawerId, setDrawerId,
     datasetRiskMap, lastScan, severityCol, severityCounts, riskScore, riskBand, filteredComponents,
     fileInputRef, searchRef, handleFile, updateCell, addRow, deleteRow, deleteDataset, downloadExcel, refresh,
     aiMinimized, setAiMinimized,
+    analysis, profileById, kpiFilter, setKpiFilter, handleFiles, uploadProgress, uploadHistory,
+    exportAnalysis, exportSection,
   };
+
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;
 }
 
 /* ============================== UI: Sidebar ============================== */
 const NAV_ITEMS = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/components", icon: Package, label: "Components" },
+  { to: "/components", icon: Package, label: "Component Inventory" },
   { to: "/vulnerabilities", icon: ShieldAlert, label: "Vulnerabilities" },
-  { to: "/reports", icon: FileBarChart, label: "Reports" },
-  { to: "/executive", icon: Landmark, label: "Executive Report" },
-
+  { to: "/licenses", icon: Scale, label: "Licenses" },
+  { to: "/dependencies", icon: Network, label: "Dependencies" },
+  { to: "/comparison", icon: GitCompare, label: "SBOM Comparison" },
   { to: "/sbom", icon: FileSpreadsheet, label: "SBOM" },
   { to: "/datasets", icon: Database, label: "Datasets" },
 ] as const;
+
 
 export function Sidebar() {
   const { datasets, datasetRiskMap, activeId, setActiveId, deleteDataset } = useWorkbench();
@@ -947,11 +1089,189 @@ export function AdvisoryCard({ row, index }: { row: Component; index: number }) 
   );
 }
 
+/* ============================== UI: Enterprise KPI grid ============================== */
+const KPI_TILES: Array<{ id: KpiId; label: string; tone: SeverityKey }> = [
+  { id: "all", label: "Components", tone: "info" },
+  { id: "critical", label: "Critical", tone: "critical" },
+  { id: "high", label: "High", tone: "high" },
+  { id: "medium", label: "Medium", tone: "medium" },
+  { id: "low", label: "Low", tone: "low" },
+  { id: "kev", label: "Known Exploited", tone: "critical" },
+  { id: "eol", label: "End of Life", tone: "critical" },
+  { id: "eos", label: "End of Support", tone: "high" },
+  { id: "unsupported", label: "Unsupported", tone: "high" },
+  { id: "deprecated", label: "Deprecated", tone: "medium" },
+  { id: "legacy", label: "Legacy", tone: "medium" },
+  { id: "upgrade", label: "Upgrade Required", tone: "high" },
+  { id: "appsAtRisk", label: "Apps at Risk", tone: "high" },
+  { id: "vendorsAtRisk", label: "Vendors at Risk", tone: "medium" },
+  { id: "licenseRisk", label: "License Risk", tone: "high" },
+  { id: "multiVersion", label: "Version Sprawl", tone: "medium" },
+  { id: "internetFacing", label: "Internet-facing", tone: "critical" },
+  { id: "missingMetadata", label: "Missing Metadata", tone: "info" },
+];
+
+function KpiTile({ id, label, tone, value, active, onClick }: {
+  id: KpiId; label: string; tone: SeverityKey; value: number; active: boolean; onClick: () => void;
+}) {
+  const cfg = severityConfig[tone];
+  const animated = useAnimatedCount(value);
+  return (
+    <motion.button key={id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -3 }} whileTap={{ scale: 0.98 }} onClick={onClick}
+      className={`card-elevated card-hover border p-3 text-left ${cfg.border} ${active ? `ring-2 ${cfg.ring} ring-offset-2 ring-offset-background` : ""}`}>
+      <div className="flex items-center justify-between gap-1">
+        <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${cfg.dot}`} />
+      </div>
+      <div className={`mt-1 text-2xl font-bold tracking-tight ${cfg.color}`}>{animated.toLocaleString()}</div>
+    </motion.button>
+  );
+}
+
+export function EnterpriseKpiGrid() {
+  const { analysis, kpiFilter, setKpiFilter, severityCounts } = useWorkbench();
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  return (
+    <section className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {KPI_TILES.map((t) => (
+          <KpiTile key={t.id} {...t}
+            value={analysis.counts[t.id] ?? 0}
+            active={kpiFilter === t.id}
+            onClick={() => {
+              const next = kpiFilter === t.id || t.id === "all" ? null : t.id;
+              setKpiFilter(next);
+              if (next && pathname === "/") void navigate({ to: "/components" });
+            }} />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+        <span>SBOM Health Score: <strong className="text-foreground">{analysis.healthScore}/100</strong></span>
+        <span>Risk: <strong className="text-foreground">{analysis.overallRisk}/100 ({analysis.riskCategory})</strong></span>
+        <span>Applications: <strong className="text-foreground">{analysis.applications.length}</strong></span>
+        <span>Vendors: <strong className="text-foreground">{analysis.vendors.length}</strong></span>
+        <span>Analysis confidence: <strong className="text-foreground">{analysis.confidence}%</strong></span>
+        <span>Severity spread: {severityCounts.critical}C / {severityCounts.high}H / {severityCounts.medium}M / {severityCounts.low}L</span>
+      </div>
+    </section>
+  );
+}
+
+/* ============================== UI: Findings panel ============================== */
+export function FindingsPanel() {
+  const { analysis, setKpiFilter, exportSection } = useWorkbench();
+  const navigate = useNavigate();
+  if (!analysis.findings.length) return null;
+  return (
+    <section className="space-y-3">
+      <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+        <ShieldAlert className="h-4 w-4 text-primary" /> Automatic findings
+      </h2>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {analysis.findings.map((f, i) => {
+          const cfg = severityConfig[f.severity];
+          return (
+            <motion.article key={f.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.03 }}
+              className={`card-elevated border p-4 ${cfg.border}`}>
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-sm font-semibold">{f.title}</h3>
+                <span className={`chip border ${cfg.bg} ${cfg.border} ${cfg.color} text-[10px]`}>{f.count}</span>
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground">{f.summary}</p>
+              {f.details.length > 0 && (
+                <ul className="mt-2 space-y-1 text-[11px] text-foreground/80">
+                  {f.details.slice(0, 4).map((d, j) => <li key={j} className="truncate">• {d}</li>)}
+                </ul>
+              )}
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {f.kpi && (
+                  <Button size="sm" variant="outline" className="h-7 rounded-lg text-[11px]"
+                    onClick={() => { setKpiFilter(f.kpi!); void navigate({ to: "/components" }); }}>
+                    View components
+                  </Button>
+                )}
+                {f.columns && f.rows && (
+                  <Button size="sm" variant="ghost" className="h-7 rounded-lg text-[11px]"
+                    onClick={() => void exportSection(f.title, { name: f.title, columns: f.columns!, rows: f.rows! }, "xlsx")}>
+                    <Download className="mr-1 h-3 w-3" /> Export
+                  </Button>
+                )}
+              </div>
+            </motion.article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/* ============================== UI: Component profile intelligence ============================== */
+function ProfileIntel({ profile: p }: { profile: ComponentProfile }) {
+  const cfg = severityConfig[p.severity];
+  const rows: Array<[string, string]> = [
+    ["Package", p.packageName || p.name || "—"],
+    ["Version", p.version || "—"],
+    ["Supplier", p.supplier || "—"],
+    ["Application", p.application || "—"],
+    ["PURL", p.purl || "—"],
+    ["CPE", p.cpe || "—"],
+    ["Hash", p.hash || "—"],
+    ["License", `${p.license || "Unknown"} (${p.licenseType})`],
+    ["CVE", p.cve || "—"],
+    ["CVSS", p.cvss ? String(p.cvss) : "—"],
+    ["Lifecycle", p.lifecycleStatus],
+    ["Support", p.supportStatus],
+    ["Remediation", p.remediationStatus],
+    ["Recommended action", p.recommendedAction],
+    ["Target version", p.targetVersion || "—"],
+    ["Latest version", p.latestVersion || "—"],
+    ["EOL date", p.eolDate || "—"],
+    ["EOS date", p.eosDate || "—"],
+    ["Priority", p.priority],
+    ["Confidence", p.confidence],
+    ["Evidence source", p.evidenceSource],
+    ["Exposure", p.exposure],
+    ["Business impact", p.businessImpact],
+    ["Direct dependencies", p.dependsOn.length ? p.dependsOn.join(", ") : "—"],
+    ["Used by", p.dependencyOf.length ? p.dependencyOf.join(", ") : "—"],
+  ];
+  return (
+    <div className={`mb-4 rounded-xl border p-4 ${cfg.border} ${cfg.bg}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`chip border bg-background/90 ${cfg.border} ${cfg.color} text-[10px]`}>
+          {cfg.label}{p.estimated ? " · estimated" : ""}
+        </span>
+        <span className="chip border border-border bg-background/90 text-[10px]">Risk {p.riskScore}/100 · {p.riskCategory}</span>
+        {p.kev && <span className="chip border border-severity-critical/40 bg-background/90 text-[10px] text-severity-critical">Known exploited</span>}
+        {p.missing.length > 0 && <span className="chip border border-border bg-background/90 text-[10px]">Missing: {p.missing.join(", ")}</span>}
+      </div>
+      <div className="mt-3 grid gap-x-4 gap-y-1.5 sm:grid-cols-2">
+        {rows.map(([k, v]) => (
+          <div key={k} className="min-w-0 text-[11px]">
+            <span className="text-muted-foreground">{k}: </span>
+            <span className="break-words font-medium text-foreground">{v}</span>
+          </div>
+        ))}
+      </div>
+      {p.classificationReason && (
+        <p className="mt-3 rounded-lg bg-background/70 p-2 text-[11px] text-muted-foreground">
+          {p.classificationReason}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* ============================== UI: Detail drawer ============================== */
 export function DetailDrawer() {
-  const { drawerId, setDrawerId, components, active, updateCell } = useWorkbench();
+  const { drawerId, setDrawerId, components, active, updateCell, profileById } = useWorkbench();
   const row = drawerId ? components.find((c) => c.id === drawerId) ?? null : null;
   const columns = active?.columns ?? [];
+  const profile = row ? profileById[row.id] : undefined;
   const [edit, setEdit] = useState(false);
   useEffect(() => { setEdit(false); }, [row?.id]);
   useEffect(() => {
@@ -990,6 +1310,7 @@ export function DetailDrawer() {
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-5">
+              {profile && <ProfileIntel profile={profile} />}
               <div className="grid gap-2.5">
                 {columns.map((col) => {
                   const Ic = iconFor(col);
