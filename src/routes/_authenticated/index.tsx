@@ -23,8 +23,10 @@ function DashboardPage() {
 
   return (
     <>
-      <KpiRow />
+      <EnterpriseKpiGrid />
       <ActiveFilterChip />
+      <FindingsPanel />
+
 
       <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         {/* Dataset summary */}
