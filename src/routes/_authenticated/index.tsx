@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AnimatePresence } from "framer-motion";
 import {
-  useWorkbench, KpiRow, ActiveFilterChip, EnterpriseRiskCard, AnimatedSeverityBar,
+  useWorkbench, ActiveFilterChip, EnterpriseRiskCard, AnimatedSeverityBar,
   ChartsRow, SearchBar, AdvisoryCard, EmptyState, SkeletonList, NoDataset, severityConfig,
+  EnterpriseKpiGrid, FindingsPanel,
 } from "@/lib/workbench-shared";
 import type { SeverityKey } from "@/lib/workbench-shared";
 import { motion } from "framer-motion";
