@@ -411,8 +411,14 @@ function VulnPage() {
         ))}
       </section>
 
+      <EnterpriseKpiGrid />
+      <FindingsPanel />
+
       <ActiveFilterChip />
       <SearchBar />
+
+      <ComponentTable />
+
 
       {facet !== "all" && (
         <div className="flex items-center gap-2 text-xs">

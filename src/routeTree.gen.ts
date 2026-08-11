@@ -15,6 +15,7 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as AuthenticatedVulnerabilitiesRouteImport } from './routes/_authenticated/vulnerabilities'
 import { Route as AuthenticatedSbomRouteImport } from './routes/_authenticated/sbom'
+import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedLicensesRouteImport } from './routes/_authenticated/licenses'
 import { Route as AuthenticatedDatasetsRouteImport } from './routes/_authenticated/datasets'
 
@@ -48,6 +49,11 @@ const AuthenticatedSbomRoute = AuthenticatedSbomRouteImport.update({
   path: '/sbom',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedLicensesRoute = AuthenticatedLicensesRouteImport.update({
   id: '/licenses',
   path: '/licenses',
@@ -64,6 +70,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/datasets': typeof AuthenticatedDatasetsRoute
   '/licenses': typeof AuthenticatedLicensesRoute
+  '/reports': typeof AuthenticatedReportsRoute
   '/sbom': typeof AuthenticatedSbomRoute
   '/vulnerabilities': typeof AuthenticatedVulnerabilitiesRoute
   '/api/chat': typeof ApiChatRoute
@@ -72,6 +79,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/datasets': typeof AuthenticatedDatasetsRoute
   '/licenses': typeof AuthenticatedLicensesRoute
+  '/reports': typeof AuthenticatedReportsRoute
   '/sbom': typeof AuthenticatedSbomRoute
   '/vulnerabilities': typeof AuthenticatedVulnerabilitiesRoute
   '/api/chat': typeof ApiChatRoute
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/datasets': typeof AuthenticatedDatasetsRoute
   '/_authenticated/licenses': typeof AuthenticatedLicensesRoute
+  '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/sbom': typeof AuthenticatedSbomRoute
   '/_authenticated/vulnerabilities': typeof AuthenticatedVulnerabilitiesRoute
   '/api/chat': typeof ApiChatRoute
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/datasets'
     | '/licenses'
+    | '/reports'
     | '/sbom'
     | '/vulnerabilities'
     | '/api/chat'
@@ -103,6 +113,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/datasets'
     | '/licenses'
+    | '/reports'
     | '/sbom'
     | '/vulnerabilities'
     | '/api/chat'
@@ -113,6 +124,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/datasets'
     | '/_authenticated/licenses'
+    | '/_authenticated/reports'
     | '/_authenticated/sbom'
     | '/_authenticated/vulnerabilities'
     | '/api/chat'
@@ -169,6 +181,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSbomRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/reports': {
+      id: '/_authenticated/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AuthenticatedReportsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/licenses': {
       id: '/_authenticated/licenses'
       path: '/licenses'
@@ -189,6 +208,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDatasetsRoute: typeof AuthenticatedDatasetsRoute
   AuthenticatedLicensesRoute: typeof AuthenticatedLicensesRoute
+  AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedSbomRoute: typeof AuthenticatedSbomRoute
   AuthenticatedVulnerabilitiesRoute: typeof AuthenticatedVulnerabilitiesRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
@@ -197,6 +217,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDatasetsRoute: AuthenticatedDatasetsRoute,
   AuthenticatedLicensesRoute: AuthenticatedLicensesRoute,
+  AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedSbomRoute: AuthenticatedSbomRoute,
   AuthenticatedVulnerabilitiesRoute: AuthenticatedVulnerabilitiesRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
