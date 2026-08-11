@@ -303,12 +303,13 @@ export async function exportUtiDocx(r: UtiReport) {
     });
   };
 
-  const children: InstanceType<typeof Paragraph>[] = ([] as unknown as InstanceType<typeof Paragraph>[]).concat(
+  type Child = InstanceType<typeof Paragraph> | InstanceType<typeof Table>;
+  const children: Child[] = [
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: "Software Bill of Material (SBoM)", bold: true, size: 36 })] }),
     new Paragraph({ children: [new TextRun({ text: `${r.dataset} · generated ${new Date(r.generatedAt).toLocaleString()}`, size: 20, color: "555555" })] }),
     new Paragraph({ children: [new TextRun({ text: r.classification, size: 16, color: "888888" })] }),
     new Paragraph({ children: [new TextRun("")] }),
-  ] as InstanceType<typeof Paragraph>[]);
+  ];
 
   for (const s of r.sections) {
     children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: s.title, bold: true, size: 26 })] }));
