@@ -163,7 +163,7 @@ export function buildUtiReport(dataset: string, a: PlatformAnalysis): UtiReport 
     {
       title: "10. Evidence Appendix",
       columns: ["Component", "Evidence source", "Confidence", "Rationale", "Reference"],
-      rows: p.map((x) => [dash(x.name), dash(x.evidenceSource), dash(x.confidence), dash(x.classificationReason), dash(x.record.intel.reference ?? (x.name ? `https://osv.dev/list?q=${encodeURIComponent(x.name)}` : ""))]),
+      rows: p.map((x) => [dash(x.name), dash(x.evidenceSource), dash(x.confidence), dash(x.classificationReason), dash((x.name ? `https://osv.dev/list?q=${encodeURIComponent(x.name)}` : ""))]),
     },
   ];
 
@@ -303,12 +303,12 @@ export async function exportUtiDocx(r: UtiReport) {
     });
   };
 
-  const children: object[] = [
+  const children: InstanceType<typeof Paragraph>[] = ([] as unknown as InstanceType<typeof Paragraph>[]).concat(
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: "Software Bill of Material (SBoM)", bold: true, size: 36 })] }),
     new Paragraph({ children: [new TextRun({ text: `${r.dataset} · generated ${new Date(r.generatedAt).toLocaleString()}`, size: 20, color: "555555" })] }),
     new Paragraph({ children: [new TextRun({ text: r.classification, size: 16, color: "888888" })] }),
     new Paragraph({ children: [new TextRun("")] }),
-  ];
+  ] as InstanceType<typeof Paragraph>[]);
 
   for (const s of r.sections) {
     children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: s.title, bold: true, size: 26 })] }));
