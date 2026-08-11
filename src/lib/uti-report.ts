@@ -46,11 +46,11 @@ export function utiRecord(p: ComponentProfile): UtiField[] {
   return [
     { field: "Component Name & origin", description: "Name of the software component or library", value: `${dash(p.name)}${p.supplier ? ` (origin: ${p.supplier})` : ""}` },
     { field: "Version", description: "Version number or identifier of the component", value: dash(p.version) },
-    { field: "Description", description: "Brief description of the functionality and purpose of the component", value: dash(rec.description || p.businessImpact) },
+    { field: "Description", description: "Brief description of the functionality and purpose of the component", value: dash(String(rec.raw["Description"] ?? rec.raw["description"] ?? "") || p.businessImpact) },
     { field: "Supplier", description: "Entity or organisation that supplied the component", value: dash(p.supplier) },
     { field: "License Type", description: "License under which the component is distributed", value: `${dash(p.license)} · ${p.licenseType}` },
     { field: "Usage Restriction", description: "Limitations or restrictions on the use of the component", value: p.licenseType === "Strong Copyleft" ? "Source disclosure obligations on distribution" : p.licenseType === "Proprietary" ? "Commercial license terms apply" : p.licenseType === "Unknown" ? "Not declared — legal review required" : "No material restriction identified" },
-    { field: "Release Date", description: "Date when this version was released", value: dash(rec.publishedDate) },
+    { field: "Release Date", description: "Date when this version was released", value: dash(rec.published) },
     { field: "End of Life Date/End of Support", description: "Date after which the component is no longer supported", value: dash([p.eolDate && `EOL ${p.eolDate}`, p.eosDate && `EOS ${p.eosDate}`].filter(Boolean).join(" · ") || p.lifecycleStatus) },
     { field: "Update Frequency", description: "How often the component is updated by the vendor", value: p.latestVersion && p.latestVersion !== p.version ? "Actively maintained — newer release available" : p.supportStatus === "Unsupported" ? "No longer updated by vendor" : "Vendor cadence not published" },
     { field: "Executable Property", description: "Whether the component contains directly executable code", value: executable },
@@ -163,7 +163,7 @@ export function buildUtiReport(dataset: string, a: PlatformAnalysis): UtiReport 
     {
       title: "10. Evidence Appendix",
       columns: ["Component", "Evidence source", "Confidence", "Rationale", "Reference"],
-      rows: p.map((x) => [dash(x.name), dash(x.evidenceSource), dash(x.confidence), dash(x.classificationReason), dash(x.record.references?.[0] ?? (x.purl ? `https://osv.dev/list?q=${encodeURIComponent(x.name)}` : ""))]),
+      rows: p.map((x) => [dash(x.name), dash(x.evidenceSource), dash(x.confidence), dash(x.classificationReason), dash(x.record.intel.reference ?? (x.name ? `https://osv.dev/list?q=${encodeURIComponent(x.name)}` : ""))]),
     },
   ];
 
@@ -240,9 +240,6 @@ export async function exportUtiPdf(r: UtiReport) {
       willDrawPage: () => { /* keep header spacing consistent */ },
       showHead: "firstPage",
       pageBreak: "auto",
-      didParseCell: () => { /* noop */ },
-      // section heading
-      beforePageBreak: undefined as never,
     });
     const after = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
     doc.setFontSize(11);
@@ -306,7 +303,7 @@ export async function exportUtiDocx(r: UtiReport) {
     });
   };
 
-  const children: (Paragraph | Table)[] = [
+  const children: object[] = [
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: "Software Bill of Material (SBoM)", bold: true, size: 36 })] }),
     new Paragraph({ children: [new TextRun({ text: `${r.dataset} · generated ${new Date(r.generatedAt).toLocaleString()}`, size: 20, color: "555555" })] }),
     new Paragraph({ children: [new TextRun({ text: r.classification, size: 16, color: "888888" })] }),
