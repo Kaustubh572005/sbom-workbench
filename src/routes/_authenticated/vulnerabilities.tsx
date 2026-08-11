@@ -9,9 +9,11 @@ import {
 } from "lucide-react";
 import {
   useWorkbench, ActiveFilterChip, SearchBar, NoDataset, severityConfig,
-  askAnalyst, useAnimatedCount,
+  askAnalyst, useAnimatedCount, EnterpriseKpiGrid, FindingsPanel,
 } from "@/lib/workbench-shared";
+import { ComponentTable } from "@/components/ComponentTable";
 import type { SeverityKey } from "@/lib/workbench-shared";
+
 import { buildVulnIntel, intelKey, type Enrichment, type GroupRisk, type VulnRecord } from "@/lib/vuln-intel";
 import {
   lifecycleTone, supportTone, remediationTone, priorityTone, confidenceTone,
