@@ -780,7 +780,7 @@ export function KpiRow() {
 
   const onTile = (key: SeverityKey | "all") => {
     setSeverityFilter(key);
-    if (key !== "all" && pathname === "/") navigate({ to: "/components" });
+    if (key !== "all" && pathname === "/") navigate({ to: "/vulnerabilities" });
   };
 
   return (
