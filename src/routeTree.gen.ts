@@ -15,11 +15,9 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as AuthenticatedVulnerabilitiesRouteImport } from './routes/_authenticated/vulnerabilities'
 import { Route as AuthenticatedSbomRouteImport } from './routes/_authenticated/sbom'
+import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedLicensesRouteImport } from './routes/_authenticated/licenses'
-import { Route as AuthenticatedDependenciesRouteImport } from './routes/_authenticated/dependencies'
 import { Route as AuthenticatedDatasetsRouteImport } from './routes/_authenticated/datasets'
-import { Route as AuthenticatedComponentsRouteImport } from './routes/_authenticated/components'
-import { Route as AuthenticatedComparisonRouteImport } from './routes/_authenticated/comparison'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -51,52 +49,37 @@ const AuthenticatedSbomRoute = AuthenticatedSbomRouteImport.update({
   path: '/sbom',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedLicensesRoute = AuthenticatedLicensesRouteImport.update({
   id: '/licenses',
   path: '/licenses',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedDependenciesRoute =
-  AuthenticatedDependenciesRouteImport.update({
-    id: '/dependencies',
-    path: '/dependencies',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedDatasetsRoute = AuthenticatedDatasetsRouteImport.update({
   id: '/datasets',
   path: '/datasets',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedComponentsRoute = AuthenticatedComponentsRouteImport.update({
-  id: '/components',
-  path: '/components',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedComparisonRoute = AuthenticatedComparisonRouteImport.update({
-  id: '/comparison',
-  path: '/comparison',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/auth': typeof AuthRoute
-  '/comparison': typeof AuthenticatedComparisonRoute
-  '/components': typeof AuthenticatedComponentsRoute
   '/datasets': typeof AuthenticatedDatasetsRoute
-  '/dependencies': typeof AuthenticatedDependenciesRoute
   '/licenses': typeof AuthenticatedLicensesRoute
+  '/reports': typeof AuthenticatedReportsRoute
   '/sbom': typeof AuthenticatedSbomRoute
   '/vulnerabilities': typeof AuthenticatedVulnerabilitiesRoute
   '/api/chat': typeof ApiChatRoute
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
-  '/comparison': typeof AuthenticatedComparisonRoute
-  '/components': typeof AuthenticatedComponentsRoute
   '/datasets': typeof AuthenticatedDatasetsRoute
-  '/dependencies': typeof AuthenticatedDependenciesRoute
   '/licenses': typeof AuthenticatedLicensesRoute
+  '/reports': typeof AuthenticatedReportsRoute
   '/sbom': typeof AuthenticatedSbomRoute
   '/vulnerabilities': typeof AuthenticatedVulnerabilitiesRoute
   '/api/chat': typeof ApiChatRoute
@@ -106,11 +89,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
-  '/_authenticated/comparison': typeof AuthenticatedComparisonRoute
-  '/_authenticated/components': typeof AuthenticatedComponentsRoute
   '/_authenticated/datasets': typeof AuthenticatedDatasetsRoute
-  '/_authenticated/dependencies': typeof AuthenticatedDependenciesRoute
   '/_authenticated/licenses': typeof AuthenticatedLicensesRoute
+  '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/sbom': typeof AuthenticatedSbomRoute
   '/_authenticated/vulnerabilities': typeof AuthenticatedVulnerabilitiesRoute
   '/api/chat': typeof ApiChatRoute
@@ -121,22 +102,18 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
-    | '/comparison'
-    | '/components'
     | '/datasets'
-    | '/dependencies'
     | '/licenses'
+    | '/reports'
     | '/sbom'
     | '/vulnerabilities'
     | '/api/chat'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/auth'
-    | '/comparison'
-    | '/components'
     | '/datasets'
-    | '/dependencies'
     | '/licenses'
+    | '/reports'
     | '/sbom'
     | '/vulnerabilities'
     | '/api/chat'
@@ -145,11 +122,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authenticated'
     | '/auth'
-    | '/_authenticated/comparison'
-    | '/_authenticated/components'
     | '/_authenticated/datasets'
-    | '/_authenticated/dependencies'
     | '/_authenticated/licenses'
+    | '/_authenticated/reports'
     | '/_authenticated/sbom'
     | '/_authenticated/vulnerabilities'
     | '/api/chat'
@@ -206,18 +181,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSbomRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/reports': {
+      id: '/_authenticated/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AuthenticatedReportsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/licenses': {
       id: '/_authenticated/licenses'
       path: '/licenses'
       fullPath: '/licenses'
       preLoaderRoute: typeof AuthenticatedLicensesRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/dependencies': {
-      id: '/_authenticated/dependencies'
-      path: '/dependencies'
-      fullPath: '/dependencies'
-      preLoaderRoute: typeof AuthenticatedDependenciesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/datasets': {
@@ -227,40 +202,22 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDatasetsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/components': {
-      id: '/_authenticated/components'
-      path: '/components'
-      fullPath: '/components'
-      preLoaderRoute: typeof AuthenticatedComponentsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/comparison': {
-      id: '/_authenticated/comparison'
-      path: '/comparison'
-      fullPath: '/comparison'
-      preLoaderRoute: typeof AuthenticatedComparisonRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
-  AuthenticatedComparisonRoute: typeof AuthenticatedComparisonRoute
-  AuthenticatedComponentsRoute: typeof AuthenticatedComponentsRoute
   AuthenticatedDatasetsRoute: typeof AuthenticatedDatasetsRoute
-  AuthenticatedDependenciesRoute: typeof AuthenticatedDependenciesRoute
   AuthenticatedLicensesRoute: typeof AuthenticatedLicensesRoute
+  AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedSbomRoute: typeof AuthenticatedSbomRoute
   AuthenticatedVulnerabilitiesRoute: typeof AuthenticatedVulnerabilitiesRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
-  AuthenticatedComparisonRoute: AuthenticatedComparisonRoute,
-  AuthenticatedComponentsRoute: AuthenticatedComponentsRoute,
   AuthenticatedDatasetsRoute: AuthenticatedDatasetsRoute,
-  AuthenticatedDependenciesRoute: AuthenticatedDependenciesRoute,
   AuthenticatedLicensesRoute: AuthenticatedLicensesRoute,
+  AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedSbomRoute: AuthenticatedSbomRoute,
   AuthenticatedVulnerabilitiesRoute: AuthenticatedVulnerabilitiesRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,

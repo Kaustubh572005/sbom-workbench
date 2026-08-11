@@ -14,7 +14,8 @@ import {
   BarChart, Bar,
 } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
-import { parseSbomText, normalizeTabularRows } from "@/lib/sbom-parse";
+import { extractFromFile, ACCEPTED_UPLOAD_TYPES } from "@/lib/universal-import";
+import { buildUtiReport, type UtiReport } from "@/lib/uti-report";
 import { buildReport, type AnalysisReport } from "@/lib/risk-intel";
 import { AnalysisReportCard } from "@/components/AnalysisReport";
 import {
@@ -219,6 +220,7 @@ type WorkbenchCtx = {
   handleFiles: (files: File[], targetDatasetId: string | null) => Promise<void>;
   uploadProgress: { current: number; total: number; name: string } | null;
   uploadHistory: UploadEntry[];
+  utiReport: UtiReport;
   exportAnalysis: (fmt: "xlsx" | "csv" | "json") => Promise<void>;
   exportSection: (name: string, sheet: Sheet, fmt: "xlsx" | "csv" | "json") => Promise<void>;
 };
@@ -301,6 +303,12 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   }), [analysis]);
 
   const riskScore = analysis.overallRisk;
+
+  /* automatic UTI AMC report — rebuilt whenever the inventory changes */
+  const utiReport = useMemo(
+    () => buildUtiReport(active?.name ?? "SBOM", analysis),
+    [active?.name, analysis],
+  );
 
 
   const riskBand: WorkbenchCtx["riskBand"] =
@@ -385,26 +393,14 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const handleFile = useCallback(async (file: File, targetDatasetId: string | null) => {
     setUploading(true);
     try {
-      let rows: Record<string, unknown>[] = [];
-      let sheetCols: string[] = [];
-      let format = "Tabular";
-      const isSpreadsheet = /\.(xlsx|xls|csv)$/i.test(file.name);
-      if (!isSpreadsheet) {
-        const parsed = parseSbomText(await file.text(), file.name);
-        rows = parsed.rows; sheetCols = parsed.columns; format = parsed.format;
-        toast.info(`Detected ${parsed.format} — ${parsed.rows.length} components extracted`);
-        parsed.notes.forEach((nt: string) => toast.message(nt));
-      } else {
-        const buf = await file.arrayBuffer();
-        const wb = XLSX.read(buf, { type: "array" });
-        format = /\.csv$/i.test(file.name) ? "CSV" : "Excel";
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-        const norm = normalizeTabularRows(raw, format);
-        rows = norm.rows; sheetCols = norm.columns;
-      }
+      const parsed = await extractFromFile(file);
+      let rows = parsed.rows;
+      const sheetCols = parsed.columns;
+      const format = parsed.format;
+      toast.info(`Detected ${format} — ${rows.length} component(s) extracted`);
+      parsed.notes.slice(0, 6).forEach((nt: string) => toast.message(nt));
 
-      if (!rows.length) { toast.error(`No components found in ${file.name}`); return; }
+      if (!rows.length) { toast.error(`No usable SBOM information found in ${file.name}`); return; }
 
       // duplicate detection inside the uploaded file itself
       const seen = new Set<string>();
@@ -626,7 +622,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     datasetRiskMap, lastScan, severityCol, severityCounts, riskScore, riskBand, filteredComponents,
     fileInputRef, searchRef, handleFile, updateCell, addRow, deleteRow, deleteDataset, downloadExcel, refresh,
     aiMinimized, setAiMinimized,
-    analysis, profileById, kpiFilter, setKpiFilter, handleFiles, uploadProgress, uploadHistory,
+    analysis, profileById, kpiFilter, setKpiFilter, handleFiles, uploadProgress, uploadHistory, utiReport,
     exportAnalysis, exportSection,
   };
 
@@ -636,11 +632,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 /* ============================== UI: Sidebar ============================== */
 const NAV_ITEMS = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/components", icon: Package, label: "Component Inventory" },
-  { to: "/vulnerabilities", icon: ShieldAlert, label: "Vulnerabilities" },
+  { to: "/vulnerabilities", icon: ShieldAlert, label: "Vulnerability Intelligence" },
   { to: "/licenses", icon: Scale, label: "Licenses" },
-  { to: "/dependencies", icon: Network, label: "Dependencies" },
-  { to: "/comparison", icon: GitCompare, label: "SBOM Comparison" },
+  { to: "/reports", icon: FileBarChart, label: "Reports" },
   { to: "/sbom", icon: FileSpreadsheet, label: "SBOM" },
   { to: "/datasets", icon: Database, label: "Datasets" },
 ] as const;
@@ -715,7 +709,7 @@ export function Sidebar() {
 
 /* ============================== UI: Header ============================== */
 export function Header({ userEmail, onSignOut }: { userEmail?: string; onSignOut: () => void }) {
-  const { datasets, active, lastScan, riskScore, riskBand, uploading, fileInputRef, handleFile, downloadExcel } = useWorkbench();
+  const { datasets, active, lastScan, riskScore, riskBand, uploading, fileInputRef, handleFiles, downloadExcel } = useWorkbench();
   const greeting = useMemo(() => {
     const h = new Date().getHours();
     if (h < 12) return "Good morning";
@@ -748,8 +742,8 @@ export function Header({ userEmail, onSignOut }: { userEmail?: string; onSignOut
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.json,.cdx,.spdx,.xml,.rdf,.yaml,.yml,.txt,.pom,.mod,.lock,.list" className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f, null); }} />
+          <input ref={fileInputRef} type="file" accept={ACCEPTED_UPLOAD_TYPES} multiple className="hidden"
+            onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) void handleFiles(fs, null); }} />
           {active && (
             <Button onClick={() => void downloadExcel()} variant="outline" size="sm" className="rounded-xl">
               <Download className="mr-1 h-4 w-4" /> Export
@@ -786,7 +780,7 @@ export function KpiRow() {
 
   const onTile = (key: SeverityKey | "all") => {
     setSeverityFilter(key);
-    if (key !== "all" && pathname === "/") navigate({ to: "/components" });
+    if (key !== "all" && pathname === "/") navigate({ to: "/vulnerabilities" });
   };
 
   return (
@@ -1144,7 +1138,7 @@ export function EnterpriseKpiGrid() {
             onClick={() => {
               const next = kpiFilter === t.id || t.id === "all" ? null : t.id;
               setKpiFilter(next);
-              if (next && pathname === "/") void navigate({ to: "/components" });
+              if (next && pathname === "/") void navigate({ to: "/vulnerabilities" });
             }} />
         ))}
       </div>
@@ -1190,7 +1184,7 @@ export function FindingsPanel() {
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {f.kpi && (
                   <Button size="sm" variant="outline" className="h-7 rounded-lg text-[11px]"
-                    onClick={() => { setKpiFilter(f.kpi!); void navigate({ to: "/components" }); }}>
+                    onClick={() => { setKpiFilter(f.kpi!); void navigate({ to: "/vulnerabilities" }); }}>
                     View components
                   </Button>
                 )}
