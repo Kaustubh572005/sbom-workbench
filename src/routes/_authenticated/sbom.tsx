@@ -5,7 +5,16 @@ import { Plus, Upload, Download, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
 
 export const Route = createFileRoute("/_authenticated/sbom")({
-  head: () => ({ meta: [{ title: "SBOM — SBOM Workbench" }] }),
+  head: () => ({
+    meta: [
+      { title: "SBOM Register — SBOM Workbench" },
+      { name: "description", content: "Review, search, edit, append and export the active software bill of materials." },
+      { property: "og:title", content: "SBOM Register — SBOM Workbench" },
+      { property: "og:description", content: "Manage normalized SBOM component records and source data." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
   component: SbomPage,
 });
 

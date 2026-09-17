@@ -13,6 +13,10 @@ export const Route = createFileRoute("/auth")({
     meta: [
       { title: "Sign in — SBOM Workbench" },
       { name: "description", content: "Sign in to your secure SBOM & VAPT workbench." },
+      { property: "og:title", content: "Sign in — SBOM Workbench" },
+      { property: "og:description", content: "Secure access to enterprise SBOM and vulnerability intelligence." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: AuthPage,
