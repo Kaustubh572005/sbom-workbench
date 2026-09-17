@@ -1,0 +1,19 @@
+{
+  "source": "vulnera-zen-main.zip",
+  "capabilities": [
+    {"capability":"application source and interface","source":"uploaded archive","outcome":"merge supplied implementation while preserving managed runtime files","status":"inspected","next_action":"copy newer source files and verify"},
+    {"capability":"database schema","source":"uploaded migrations","outcome":"compare and preserve compatible datasets/components schema","status":"inspected","next_action":"apply only missing compatible migration changes"},
+    {"capability":"existing database records","source":"not included","outcome":"retain current Lovable Cloud records","status":"preserve","next_action":"none"},
+    {"capability":"authentication","source":"uploaded source and current managed auth","outcome":"preserve current managed authentication while matching supplied UI","status":"inspected","next_action":"merge without overwriting generated auth clients"},
+    {"capability":"authorization","source":"uploaded RLS migrations","outcome":"preserve per-user access controls","status":"inspected","next_action":"verify policies and grants"},
+    {"capability":"AI security analyst","source":"uploaded chat route","outcome":"preserve supplied AI analysis behavior","status":"inspected","next_action":"merge and verify"},
+    {"capability":"universal SBOM imports and reports","source":"uploaded parsers and report generators","outcome":"use supplied implementation","status":"inspected","next_action":"merge and verify"},
+    {"capability":"uploaded file bytes","source":"not included","outcome":"no separate stored files to import","status":"not_applicable","next_action":"none"},
+    {"capability":"external providers and threat intelligence","source":"uploaded source","outcome":"preserve existing HTTP-based intelligence integrations","status":"inspected","next_action":"verify safe public paths"},
+    {"capability":"public endpoints and callbacks","source":"uploaded source","outcome":"preserve chat endpoint and auth callbacks","status":"inspected","next_action":"verify routes"},
+    {"capability":"payments, webhooks, schedules","source":"not detected","outcome":"none","status":"not_applicable","next_action":"none"},
+    {"capability":"secrets","source":"variable names only","outcome":"reuse current managed configuration","status":"preserve","next_action":"none"},
+    {"capability":"cutover","source":"current Lovable app","outcome":"in-place source replacement","status":"pending","next_action":"verify preview"},
+    {"capability":"verification","source":"preview","outcome":"desktop and mobile smoke test","status":"pending","next_action":"run after merge"}
+  ]
+}
