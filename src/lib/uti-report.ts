@@ -9,13 +9,19 @@ import { exportCsv, exportJson, exportXlsx, type Sheet } from "@/lib/export-anal
 
 export type UtiField = { field: string; description: string; value: string };
 export type UtiSection = { title: string; columns: string[]; rows: (string | number)[][]; narrative?: string[] };
+export type RawLayer = { columns: string[]; rows: (string | number)[][] };
 export type UtiReport = {
   dataset: string;
   generatedAt: string;
   classification: string;
   records: { component: string; fields: UtiField[] }[];
   sections: UtiSection[];
+  /** Untouched imported data, preserved for the "Raw Imported Data" sheet. */
+  raw?: RawLayer;
+  vulnRows?: (string | number)[][];
+  riskRows?: (string | number)[][];
 };
+
 
 const CLASSIFICATION = "Information Classification: UTI AMC - Internal";
 const dash = (v: unknown) => {
@@ -30,7 +36,38 @@ const plusMonths = (n: number) => {
 };
 
 /* ------------------------- per-component UTI record ------------------------- */
+/**
+ * Fallback text used when a field cannot be sourced from the SBOM or the
+ * analysis engine, so that exported reports never contain blank cells.
+ */
+const FALLBACK: Record<string, string> = {
+  "Version": "Not declared in SBOM — vendor confirmation required",
+  "Description": "Not declared in SBOM — functional description to be supplied by vendor",
+  "Supplier": "Not declared in SBOM — provenance to be confirmed with vendor",
+  "Release Date": "Not published by vendor",
+  "End of Life Date/End of Support": "Not published by vendor — lifecycle validation required",
+  "Checksums": "Not provided in SBOM — integrity value to be supplied by vendor",
+  "Hashes": "Not provided in SBOM — cryptographic hash to be supplied by vendor",
+  "Dependencies": "No dependencies declared in SBOM",
+  "PURL (Package URL)": "Not provided in SBOM — to be generated from package coordinates",
+  "CPE Identifier (Common Platform Enumeration)": "Not provided in SBOM — NVD mapping pending",
+  "CVE ID": "No CVE recorded against this component",
+  "Recommended Version": "No newer release identified by the analysis engine",
+  "Recommended Action": "No action required at this assessment",
+  "Reviewed By (To be filled by UTI)": "Pending UTI AMC review",
+};
+const filled = (fields: UtiField[]): UtiField[] =>
+  fields.map((f) => {
+    const v = String(f.value ?? "").trim();
+    const empty = !v || v === "—" || v === "-" || /^(n\/?a|unknown|null|undefined)$/i.test(v);
+    return empty ? { ...f, value: FALLBACK[f.field] ?? "Not provided in SBOM — vendor confirmation required" } : { ...f, value: v };
+  });
+
 export function utiRecord(p: ComponentProfile): UtiField[] {
+  return filled(utiRecordRaw(p));
+}
+
+function utiRecordRaw(p: ComponentProfile): UtiField[] {
   const rec = p.record;
   const executable = /lib|dll|exe|runtime|jre|jdk|dotnet|\.net|node|python|binary/i.test(`${p.name} ${p.packageName}`)
     ? "Yes" : "Unknown";
@@ -44,9 +81,10 @@ export function utiRecord(p: ComponentProfile): UtiField[] {
     ? `Yes — ${p.lifecycleStatus}` : "No";
 
   return [
-    { field: "Component Name & origin", description: "Name of the software component or library", value: `${dash(p.name)}${p.supplier ? ` (origin: ${p.supplier})` : ""}` },
+    { field: "Component Name & origin", description: "Name of the software component or library", value: `${dash(p.name)} (origin: ${String(p.supplier ?? "").trim() || "Unknown"})` },
     { field: "Version", description: "Version number or identifier of the component", value: dash(p.version) },
-    { field: "Description", description: "Brief description of the functionality and purpose of the component", value: dash(String(rec.raw["Description"] ?? rec.raw["description"] ?? "") || p.businessImpact) },
+    { field: "Description", description: "Brief description of the functionality and purpose of the component", value: dash(String(rec.raw["Description"] ?? rec.raw["description"] ?? "").trim() || `${p.name}${p.version ? ` ${p.version}` : ""} — ${p.licenseType === "Proprietary" ? "commercial" : "open-source"} component in the analysed inventory; business impact assessed as ${p.businessImpact}. Functional description not declared in SBOM.`) },
+
     { field: "Supplier", description: "Entity or organisation that supplied the component", value: dash(p.supplier) },
     { field: "License Type", description: "License under which the component is distributed", value: `${dash(p.license)} · ${p.licenseType}` },
     { field: "Usage Restriction", description: "Limitations or restrictions on the use of the component", value: p.licenseType === "Strong Copyleft" ? "Source disclosure obligations on distribution" : p.licenseType === "Proprietary" ? "Commercial license terms apply" : p.licenseType === "Unknown" ? "Not declared — legal review required" : "No material restriction identified" },
@@ -54,6 +92,8 @@ export function utiRecord(p: ComponentProfile): UtiField[] {
     { field: "End of Life Date/End of Support", description: "Date after which the component is no longer supported", value: dash([p.eolDate && `EOL ${p.eolDate}`, p.eosDate && `EOS ${p.eosDate}`].filter(Boolean).join(" · ") || p.lifecycleStatus) },
     { field: "Update Frequency", description: "How often the component is updated by the vendor", value: p.latestVersion && p.latestVersion !== p.version ? "Actively maintained — newer release available" : p.supportStatus === "Unsupported" ? "No longer updated by vendor" : "Vendor cadence not published" },
     { field: "Executable Property", description: "Whether the component contains directly executable code", value: executable },
+    { field: "Executable Property Description", description: "Describes the executable property of the component", value: executable === "Yes" ? "Component ships compiled libraries, executables or runtime code that execute in the application process." : "No executable payload identified in the SBOM evidence — vendor confirmation required." },
+
     { field: "Dependencies", description: "Other components or libraries required by this software", value: dash(p.dependsOn.join(", ")) },
     { field: "Dependency Relation with Component", description: "Relationship to the component", value: p.dependencyOf.length ? `Transitive — used by ${p.dependencyOf.join(", ")}` : "Direct dependency" },
     { field: "Encryption Name", description: "Encryption used to secure data in transit or at rest", value: /openssl|boringssl|libsodium|bouncy|crypto|tls|ssl/i.test(p.name) ? "Component provides cryptographic functionality" : "Not applicable / not declared" },
@@ -86,7 +126,7 @@ function severitySpread(a: PlatformAnalysis) {
   return `${a.counts.critical}C / ${a.counts.high}H / ${a.counts.medium}M / ${a.counts.low}L`;
 }
 
-export function buildUtiReport(dataset: string, a: PlatformAnalysis): UtiReport {
+export function buildUtiReport(dataset: string, a: PlatformAnalysis, raw?: RawLayer): UtiReport {
   const p = a.profiles;
   const top = [...p].sort((x, y) => y.riskScore - x.riskScore);
 
@@ -160,11 +200,6 @@ export function buildUtiReport(dataset: string, a: PlatformAnalysis): UtiReport 
           dash(x.name), dash(x.version), dash(x.targetVersion || x.latestVersion), dash(x.recommendedAction), dash(x.supplier), x.riskScore >= 80 ? plusMonths(0) : plusMonths(x.riskScore >= 60 ? 1 : 3),
         ]),
     },
-    {
-      title: "10. Evidence Appendix",
-      columns: ["Component", "Evidence source", "Confidence", "Rationale", "Reference"],
-      rows: p.map((x) => [dash(x.name), dash(x.evidenceSource), dash(x.confidence), dash(x.classificationReason), dash((x.name ? `https://osv.dev/list?q=${encodeURIComponent(x.name)}` : ""))]),
-    },
   ];
 
   return {
@@ -173,36 +208,175 @@ export function buildUtiReport(dataset: string, a: PlatformAnalysis): UtiReport 
     classification: CLASSIFICATION,
     records: p.map((x) => ({ component: `${x.name}${x.version ? ` ${x.version}` : ""}`, fields: utiRecord(x) })),
     sections,
+    raw,
+    vulnRows: p.map((x) => [
+      dash(x.name), dash(x.version), dash(x.cve), x.cvss || "—", x.severity.toUpperCase(),
+      x.estimated ? "Derived (analysis)" : "Declared (SBOM)",
+      x.kev ? "KEV — actively exploited" : x.exploit ? "Public exploit" : "None known",
+      dash(x.remediationStatus), dash(x.targetVersion || x.latestVersion), dash(x.evidenceSource), dash(x.confidence),
+    ]),
+    riskRows: top.map((x, i) => [
+      i + 1, dash(x.name), dash(x.version), x.riskScore, x.riskCategory, x.severity.toUpperCase(),
+      x.exposure, dash(x.lifecycleStatus), dash(x.supportStatus), dash(x.priority), dash(x.recommendedAction),
+    ]),
   };
+}
+
+/* --------------------------------- Eway layout --------------------------------- */
+/**
+ * SBOM-EwayDMS layout: data fields down the rows, components across the
+ * columns ("Primary Component", "Component 1", "Component 2", …).
+ */
+export function ewayColumns(r: UtiReport): string[] {
+  return ["Data Field", "Description", ...r.records.map((_, i) => (i === 0 ? "Primary Component" : `Component ${i}`))];
+}
+
+export function ewayComponentNames(r: UtiReport): string[] {
+  return r.records.map((rec) => rec.component);
+}
+
+export function ewayRows(r: UtiReport): string[][] {
+  const fields = r.records[0]?.fields ?? [];
+  return fields.map((f, i) => [
+    f.field,
+    f.description,
+    ...r.records.map((rec) => rec.fields[i]?.value ?? "Not provided in SBOM — vendor confirmation required"),
+  ]);
+}
+
+export function ewayMatrixSheet(r: UtiReport): Sheet {
+  return { name: "SBOM-EwayDMS", columns: ewayColumns(r), rows: ewayRows(r) };
+}
+
+const VULN_COLUMNS = ["Component", "Version", "CVE ID", "CVSS", "Severity", "Severity basis", "Exploit status", "Patch status", "Recommended version", "Evidence source", "Confidence"];
+const RISK_COLUMNS = ["Rank", "Component", "Version", "Risk score", "Risk category", "Severity", "Exposure", "Lifecycle status", "Support status", "Priority", "Recommended action"];
+
+/** Only sheets that add information the Eway register cannot carry. */
+export function reportSheets(r: UtiReport): Sheet[] {
+  const sheets: Sheet[] = [ewayMatrixSheet(r)];
+  if (r.vulnRows?.length) sheets.push({ name: "Vulnerability Details", columns: VULN_COLUMNS, rows: r.vulnRows });
+  if (r.riskRows?.length) sheets.push({ name: "Risk Analysis", columns: RISK_COLUMNS, rows: r.riskRows });
+  if (r.raw?.rows.length) sheets.push({ name: "Raw Imported Data", columns: r.raw.columns, rows: r.raw.rows });
+  return sheets;
+}
+
+/* ------------------------------- validation ------------------------------- */
+export function validateEwayReport(r: UtiReport): { ok: boolean; issues: string[]; components: number; fields: number } {
+  const issues: string[] = [];
+  const cols = ewayColumns(r);
+  const rows = ewayRows(r);
+  if (!r.records.length) issues.push("No components were normalised from the uploaded SBOM.");
+  if (cols.length - 2 !== r.records.length) issues.push("Component column count does not match the normalised component count.");
+  const expected = r.records[0]?.fields.length ?? 0;
+  for (const rec of r.records) if (rec.fields.length !== expected) issues.push(`${rec.component}: field set is incomplete.`);
+  for (const row of rows) {
+    if (row.length !== cols.length) issues.push(`Field "${row[0]}" has a clipped column.`);
+    if (row.slice(2).some((v) => !String(v).trim())) issues.push(`Field "${row[0]}" contains an empty component cell.`);
+  }
+  const seen = new Map<string, number>();
+  for (const rec of r.records) seen.set(rec.component, (seen.get(rec.component) ?? 0) + 1);
+  for (const [k, v] of seen) if (v > 1) issues.push(`Duplicate component column: ${k} (${v}×).`);
+  return { ok: issues.length === 0, issues: issues.slice(0, 25), components: r.records.length, fields: expected };
+}
+
+/* --------------------------------- file names --------------------------------- */
+export function reportFileName(r: UtiReport): string {
+  const slug = (r.dataset || "SBOM").replace(/\.[a-z0-9]+$/i, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "") || "SBOM";
+  return `${slug}_SBOM-EwayDMS_${new Date(r.generatedAt).toISOString().slice(0, 10)}`;
 }
 
 /* --------------------------------- exports --------------------------------- */
-function recordSheet(r: UtiReport): Sheet {
-  const fields = r.records[0]?.fields.map((f) => f.field) ?? [];
-  return {
-    name: "SBoM Records",
-    columns: ["Component", ...fields],
-    rows: r.records.map((rec) => [rec.component, ...rec.fields.map((f) => f.value)]),
-  };
-}
-
-export function reportSheets(r: UtiReport): Sheet[] {
-  return [
-    recordSheet(r),
-    ...r.sections.map((s) => ({ name: s.title.replace(/^\d+\.\s*/, "").slice(0, 28), columns: s.columns, rows: s.rows })),
-  ];
-}
+const NAVY = "FF0F2A5C";
+const BAND = "FF1E3A8A";
 
 export async function exportUtiXlsx(r: UtiReport) {
-  await exportXlsx(reportSheets(r), `${r.dataset}-UTI-SBOM-report`);
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "SBOM Workbench";
+  wb.created = new Date();
+
+  /* primary Eway register */
+  const cols = ewayColumns(r);
+  const names = ewayComponentNames(r);
+  const ws = wb.addWorksheet("SBOM-EwayDMS", { views: [{ state: "frozen", xSplit: 2, ySplit: 3 }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  ws.columns = cols.map((_, i) => ({ width: i === 0 ? 34 : i === 1 ? 52 : 40 }));
+
+  const title = ws.addRow(["Software Bill of Material (SBoM) — SBOM-EwayDMS Register"]);
+  ws.mergeCells(1, 1, 1, Math.max(cols.length, 3));
+  title.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+  title.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+  title.height = 26;
+  title.alignment = { vertical: "middle", horizontal: "left" };
+
+  const meta = ws.addRow([`${r.dataset} · generated ${new Date(r.generatedAt).toLocaleString()} · ${r.records.length} component(s) · ${r.classification}`]);
+  ws.mergeCells(2, 1, 2, Math.max(cols.length, 3));
+  meta.font = { size: 9, color: { argb: "FF555555" } };
+
+  const head = ws.addRow(cols.map((c, i) => (i < 2 ? c : `${c}\n${names[i - 2]}`)));
+  head.height = 32;
+  head.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BAND } };
+    cell.alignment = { wrapText: true, vertical: "middle" };
+    cell.border = { top: { style: "thin", color: { argb: "FFCCCCCC" } }, bottom: { style: "thin", color: { argb: "FFCCCCCC" } }, left: { style: "thin", color: { argb: "FFCCCCCC" } }, right: { style: "thin", color: { argb: "FFCCCCCC" } } };
+  });
+
+  ewayRows(r).forEach((row, ri) => {
+    const wsRow = ws.addRow(row);
+    wsRow.eachCell((cell, ci) => {
+      cell.alignment = { wrapText: true, vertical: "top" };
+      cell.font = { size: 9, bold: ci === 1 };
+      cell.border = { top: { style: "hair", color: { argb: "FFDDDDDD" } }, bottom: { style: "hair", color: { argb: "FFDDDDDD" } }, left: { style: "hair", color: { argb: "FFDDDDDD" } }, right: { style: "hair", color: { argb: "FFDDDDDD" } } };
+      if (ci > 2 && ri % 2 === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF4F7FC" } };
+      if (ci === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEAF0FA" } };
+    });
+  });
+
+  /* supporting sheets only */
+  for (const s of reportSheets(r).slice(1)) {
+    const sh = wb.addWorksheet(s.name.slice(0, 30), { views: [{ state: "frozen", ySplit: 1 }] });
+    sh.columns = s.columns.map((c) => ({ header: c, key: c, width: Math.min(46, Math.max(12, c.length + 6)) }));
+    const h = sh.getRow(1);
+    h.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    h.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BAND } };
+    for (const row of s.rows) sh.addRow(row);
+    if (s.columns.length) sh.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: s.columns.length } };
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  downloadBlob(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `${reportFileName(r)}.xlsx`);
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function exportUtiCsv(r: UtiReport) {
-  exportCsv(recordSheet(r), `${r.dataset}-UTI-SBOM-report`);
+  exportCsv(ewayMatrixSheet(r), reportFileName(r));
 }
 
 export function exportUtiJson(r: UtiReport) {
-  exportJson(r, `${r.dataset}-UTI-SBOM-report`);
+  exportJson(
+    {
+      dataset: r.dataset,
+      generatedAt: r.generatedAt,
+      classification: r.classification,
+      format: "SBOM-EwayDMS",
+      fields: (r.records[0]?.fields ?? []).map((f) => ({ field: f.field, description: f.description })),
+      components: r.records.map((rec, i) => ({
+        column: i === 0 ? "Primary Component" : `Component ${i}`,
+        component: rec.component,
+        values: Object.fromEntries(rec.fields.map((f) => [f.field, f.value])),
+      })),
+      raw: r.raw ?? null,
+    },
+    reportFileName(r),
+  );
 }
 
 export async function exportUtiPdf(r: UtiReport) {
@@ -210,123 +384,135 @@ export async function exportUtiPdf(r: UtiReport) {
   const { default: autoTable } = await import("jspdf-autotable");
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const width = doc.internal.pageSize.getWidth();
+  const height = doc.internal.pageSize.getHeight();
+  const MARGIN = 32;
+  const FIELD_W = 118;
+  const DESC_W = 150;
+  const MIN_COL = 108;
+  const usable = width - MARGIN * 2 - FIELD_W - DESC_W;
+  const perPage = Math.max(2, Math.floor(usable / MIN_COL));
 
-  doc.setFillColor(15, 42, 92);
-  doc.rect(0, 0, width, 70, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(18);
-  doc.text("Software Bill of Material (SBoM)", 40, 32);
-  doc.setFontSize(10);
-  doc.text(`${r.dataset} · generated ${new Date(r.generatedAt).toLocaleString()}`, 40, 52);
-  doc.setTextColor(80, 80, 80);
-  doc.setFontSize(8);
-  doc.text(r.classification, 40, 88);
+  const cols = ewayColumns(r);
+  const names = ewayComponentNames(r);
+  const rows = ewayRows(r);
 
-  let cursor = 104;
-  for (const s of r.sections) {
+  const banner = (subtitle: string) => {
+    doc.setFillColor(15, 42, 92);
+    doc.rect(0, 0, width, 58, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(15);
+    doc.text("Software Bill of Material (SBoM) — SBOM-EwayDMS Register", MARGIN, 26);
+    doc.setFontSize(9);
+    doc.text(`${r.dataset} · generated ${new Date(r.generatedAt).toLocaleString()} · ${subtitle}`, MARGIN, 44);
+  };
+
+  let first = true;
+  for (let start = 2; start < cols.length; start += perPage) {
+    const count = Math.min(perPage, cols.length - start);
+    const idx = [0, 1, ...Array.from({ length: count }, (_, i) => start + i)];
+    if (!first) doc.addPage();
+    first = false;
+    banner(`components ${start - 1}–${start - 2 + count} of ${r.records.length}`);
+    const colWidth = Math.floor(usable / count);
     autoTable(doc, {
-      startY: cursor,
-      head: [s.columns],
-      body: s.rows.length ? s.rows.map((row) => row.map((c) => String(c))) : [s.columns.map(() => "—")],
-      styles: { fontSize: 7, cellPadding: 3, overflow: "linebreak" },
-      headStyles: { fillColor: [15, 42, 92], textColor: 255, fontSize: 7.5 },
-      alternateRowStyles: { fillColor: [244, 247, 252] },
-      margin: { left: 40, right: 40 },
-      didDrawPage: () => {
-        doc.setFontSize(8);
-        doc.setTextColor(120, 120, 120);
-        doc.text(r.classification, 40, doc.internal.pageSize.getHeight() - 16);
+      startY: 72,
+      head: [idx.map((i) => (i < 2 ? cols[i] : `${cols[i]}\n${names[i - 2]}`))],
+      body: rows.map((row) => idx.map((i) => String(row[i] ?? ""))),
+      styles: { fontSize: 7, cellPadding: 3, overflow: "linebreak", valign: "top", lineColor: [220, 220, 220], lineWidth: 0.4 },
+      headStyles: { fillColor: [30, 58, 138], textColor: 255, fontSize: 7.5, valign: "middle" },
+      columnStyles: {
+        0: { cellWidth: FIELD_W, fontStyle: "bold", fillColor: [234, 240, 250] },
+        1: { cellWidth: DESC_W, textColor: [80, 80, 80] },
+        ...Object.fromEntries(idx.slice(2).map((_, i) => [i + 2, { cellWidth: colWidth }])),
       },
-      willDrawPage: () => { /* keep header spacing consistent */ },
-      showHead: "firstPage",
-      pageBreak: "auto",
-    });
-    const after = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
-    doc.setFontSize(11);
-    doc.setTextColor(15, 42, 92);
-    cursor = after + 34;
-    if (cursor > doc.internal.pageSize.getHeight() - 120) { doc.addPage(); cursor = 60; }
-    doc.text("", 40, cursor - 14);
-  }
-
-  // per-component UTI records
-  for (const rec of r.records) {
-    doc.addPage();
-    doc.setFontSize(13);
-    doc.setTextColor(15, 42, 92);
-    doc.text(`SBoM Record — ${rec.component}`, 40, 46);
-    autoTable(doc, {
-      startY: 62,
-      head: [["Data Field", "Description", "Value"]],
-      body: rec.fields.map((f) => [f.field, f.description, f.value]),
-      styles: { fontSize: 7.5, cellPadding: 4, overflow: "linebreak" },
-      headStyles: { fillColor: [15, 42, 92], textColor: 255 },
-      columnStyles: { 0: { cellWidth: 170, fontStyle: "bold" }, 1: { cellWidth: 260 }, 2: { cellWidth: "auto" } },
-      margin: { left: 40, right: 40 },
+      margin: { left: MARGIN, right: MARGIN, top: 72 },
+      didDrawPage: () => {
+        doc.setFontSize(7.5);
+        doc.setTextColor(120, 120, 120);
+        doc.text(r.classification, MARGIN, height - 14);
+      },
     });
   }
 
-  doc.save(`${r.dataset}-UTI-SBOM-report.pdf`);
+  doc.save(`${reportFileName(r)}.pdf`);
 }
 
 export async function exportUtiDocx(r: UtiReport) {
   const {
     Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-    HeadingLevel, WidthType, ShadingType, BorderStyle, AlignmentType, PageOrientation,
+    HeadingLevel, WidthType, ShadingType, BorderStyle, AlignmentType, PageOrientation, PageBreak,
   } = await import("docx");
 
-  const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
+  const border = { style: BorderStyle.SINGLE, size: 1, color: "DDDDDD" };
   const borders = { top: border, bottom: border, left: border, right: border };
   const margins = { top: 60, bottom: 60, left: 100, right: 100 };
-  const CONTENT = 14000;
+  const CONTENT = 14400; // landscape letter, 0.5" margins
+  const FIELD_W = 2200;
+  const DESC_W = 2900;
+  const MIN_COL = 1700;
+  const perPage = Math.max(2, Math.floor((CONTENT - FIELD_W - DESC_W) / MIN_COL));
 
-  const cell = (text: string, width: number, opts: { head?: boolean } = {}) =>
+  const cols = ewayColumns(r);
+  const names = ewayComponentNames(r);
+  const rows = ewayRows(r);
+
+  const cell = (text: string, width: number, kind: "head" | "field" | "desc" | "value", alt = false) =>
     new TableCell({
       borders, margins,
       width: { size: width, type: WidthType.DXA },
-      shading: { fill: opts.head ? "0F2A5C" : "FFFFFF", type: ShadingType.CLEAR },
-      children: [new Paragraph({ children: [new TextRun({ text, bold: opts.head, color: opts.head ? "FFFFFF" : "111111", size: 16 })] })],
+      shading: {
+        fill: kind === "head" ? "1E3A8A" : kind === "field" ? "EAF0FA" : alt ? "F4F7FC" : "FFFFFF",
+        type: ShadingType.CLEAR,
+      },
+      children: text.split("\n").map((line) => new Paragraph({
+        children: [new TextRun({
+          text: line,
+          bold: kind === "head" || kind === "field",
+          color: kind === "head" ? "FFFFFF" : kind === "desc" ? "555555" : "111111",
+          size: 15,
+        })],
+      })),
     });
-
-  const table = (columns: string[], rows: (string | number)[][]) => {
-    const w = Math.floor(CONTENT / columns.length);
-    const widths = columns.map(() => w);
-    const total = w * columns.length;
-    return new Table({
-      width: { size: total, type: WidthType.DXA },
-      columnWidths: widths,
-      rows: [
-        new TableRow({ children: columns.map((c) => cell(c, w, { head: true })) }),
-        ...(rows.length ? rows : [columns.map(() => "—")]).slice(0, 400).map((row) =>
-          new TableRow({ children: columns.map((_, i) => cell(String(row[i] ?? "—"), w)) })),
-      ],
-    });
-  };
 
   type Child = InstanceType<typeof Paragraph> | InstanceType<typeof Table>;
-  const children: Child[] = [
-    new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: "Software Bill of Material (SBoM)", bold: true, size: 36 })] }),
-    new Paragraph({ children: [new TextRun({ text: `${r.dataset} · generated ${new Date(r.generatedAt).toLocaleString()}`, size: 20, color: "555555" })] }),
-    new Paragraph({ children: [new TextRun({ text: r.classification, size: 16, color: "888888" })] }),
-    new Paragraph({ children: [new TextRun("")] }),
-  ];
+  const children: Child[] = [];
 
-  for (const s of r.sections) {
-    children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: s.title, bold: true, size: 26 })] }));
-    for (const line of s.narrative ?? []) children.push(new Paragraph({ children: [new TextRun({ text: line, size: 20 })] }));
-    children.push(table(s.columns, s.rows));
-    children.push(new Paragraph({ children: [new TextRun("")] }));
-  }
+  let first = true;
+  for (let start = 2; start < cols.length; start += perPage) {
+    const count = Math.min(perPage, cols.length - start);
+    const idx = [0, 1, ...Array.from({ length: count }, (_, i) => start + i)];
+    const valueW = Math.floor((CONTENT - FIELD_W - DESC_W) / count);
+    const widths = [FIELD_W, DESC_W, ...Array.from({ length: count }, () => valueW)];
 
-  children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Appendix — SBoM Records (UTI AMC template)", bold: true, size: 26 })] }));
-  for (const rec of r.records) {
-    children.push(new Paragraph({ heading: HeadingLevel.HEADING_3, children: [new TextRun({ text: rec.component, bold: true, size: 22 })] }));
-    children.push(table(["Data Field", "Description", "Value"], rec.fields.map((f) => [f.field, f.description, f.value])));
-    children.push(new Paragraph({ children: [new TextRun("")] }));
+    if (!first) children.push(new Paragraph({ children: [new PageBreak()] }));
+    first = false;
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      children: [new TextRun({ text: "Software Bill of Material (SBoM) — SBOM-EwayDMS Register", bold: true, size: 28, color: "0F2A5C" })],
+    }));
+    children.push(new Paragraph({
+      children: [new TextRun({
+        text: `${r.dataset} · generated ${new Date(r.generatedAt).toLocaleString()} · components ${start - 1}–${start - 2 + count} of ${r.records.length}`,
+        size: 18, color: "555555",
+      })],
+    }));
+    children.push(new Table({
+      width: { size: widths.reduce((a, b) => a + b, 0), type: WidthType.DXA },
+      columnWidths: widths,
+      rows: [
+        new TableRow({
+          tableHeader: true,
+          children: idx.map((i, n) => cell(i < 2 ? cols[i] : `${cols[i]}\n${names[i - 2]}`, widths[n], "head")),
+        }),
+        ...rows.map((row, ri) => new TableRow({
+          children: idx.map((i, n) => cell(String(row[i] ?? ""), widths[n], n === 0 ? "field" : n === 1 ? "desc" : "value", ri % 2 === 1)),
+        })),
+      ],
+    }));
   }
 
   const docx = new Document({
-    styles: { default: { document: { run: { font: "Arial", size: 20 } } } },
+    styles: { default: { document: { run: { font: "Arial", size: 18 } } } },
     sections: [{
       properties: {
         page: {
@@ -334,15 +520,10 @@ export async function exportUtiDocx(r: UtiReport) {
           margin: { top: 720, right: 720, bottom: 720, left: 720 },
         },
       },
-      children: [...children, new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: r.classification, size: 16, color: "888888" })] })],
+      children: [...children, new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: r.classification, size: 15, color: "888888" })] })],
     }],
   });
 
-  const blob = await Packer.toBlob(docx);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${r.dataset}-UTI-SBOM-report.docx`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(await Packer.toBlob(docx), `${reportFileName(r)}.docx`);
 }
+

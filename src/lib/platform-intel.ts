@@ -9,6 +9,7 @@
 import { assessAll, type ComponentRisk } from "@/lib/sbom-heuristics";
 import { buildVulnIntel, intelKey, type Enrichment, type VulnIntel, type VulnRecord } from "@/lib/vuln-intel";
 import type { SevKey } from "@/lib/risk-intel";
+import { lifecycleDisplayText } from "@/lib/lifecycle-display";
 
 export type Row = Record<string, unknown>;
 export type Item = { id: string; data: Row };
@@ -605,11 +606,11 @@ export function buildPlatformAnalysis(items: Item[], intelMap: Record<string, En
     count: counts.eol + counts.eos + counts.unsupported,
     summary: `${counts.eol} end-of-life, ${counts.eos} end-of-support and ${counts.unsupported} unsupported component(s) detected.`,
     details: profiles.filter((p) => p.supportStatus === "Unsupported" || /End of/i.test(p.lifecycleStatus)).slice(0, 6)
-      .map((p) => `${p.name} ${p.version} — ${p.lifecycleStatus} → ${p.recommendedAction}`),
+      .map((p) => `${p.name} ${p.version} — ${lifecycleDisplayText(p.lifecycleStatus, p.eolDate, p.eosDate)} → ${p.recommendedAction}`),
     kpi: "unsupported",
     columns: ["Component", "Version", "Lifecycle", "Support", "Recommended action"],
     rows: profiles.filter((p) => p.supportStatus === "Unsupported" || /End of/i.test(p.lifecycleStatus)).slice(0, 25)
-      .map((p) => [p.name, p.version, p.lifecycleStatus, p.supportStatus, p.recommendedAction]),
+      .map((p) => [p.name, p.version, lifecycleDisplayText(p.lifecycleStatus, p.eolDate, p.eosDate), p.supportStatus, p.recommendedAction]),
     prompt: "Which applications run end-of-life or unsupported software, and what should replace it?",
   });
 

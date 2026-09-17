@@ -8,7 +8,7 @@
 
 import { factsOf, sevOf, type SevKey } from "@/lib/risk-intel";
 import {
-  assessLifecycle, LIFECYCLE_STATUSES, REMEDIATION_STATUSES,
+  assessLifecycle, cmpVersion, LIFECYCLE_STATUSES, REMEDIATION_STATUSES,
   type LifecycleAssessment, type LifecycleStatus, type RemediationStatus,
 } from "@/lib/lifecycle-intel";
 
@@ -27,6 +27,14 @@ export type Enrichment = {
   source?: string;
 };
 
+/** one weighted signal that contributed to the severity classification */
+export type SeverityFactor = { label: string; points: number; detail: string };
+
+export type SeveritySource =
+  | "Declared (SBOM) + multi-factor confirmed"
+  | "Escalated (multi-factor SBOM analysis)"
+  | "Derived (multi-factor SBOM analysis)";
+
 export type VulnRecord = {
   id: string;
   raw: Row;
@@ -37,6 +45,13 @@ export type VulnRecord = {
   cve: string;
   cvss: number;
   severity: SevKey;
+  /** how the severity was established (declared, escalated or fully derived) */
+  severitySource: SeveritySource;
+  declaredSeverity: SevKey;
+  /** weighted multi-factor total (0-100) behind the severity band */
+  severityScore: number;
+  /** every signal that contributed, for transparency in UI and exports */
+  severityFactors: SeverityFactor[];
   license: string;
   fix: string;
   status: string;
@@ -86,15 +101,101 @@ export function toVulnRecord(id: string, raw: Row, intel: Enrichment = {}): Vuln
   const fixAvailable = Boolean(fixedVersion || latestSafeVersion);
   const eol = f.eol || Boolean(intel.eolDate) || Boolean(intel.supportEndDate);
 
-  const sev = f.severity;
-  const base =
-    sev === "critical" ? 90 : sev === "high" ? 70 : sev === "medium" ? 45 : sev === "low" ? 20 : f.cvss * 10;
-  let riskScore = Math.max(base, f.cvss * 10);
-  if (kev) riskScore += 12;
-  if (exploit) riskScore += 8;
-  if (eol) riskScore += 6;
-  if (!fixAvailable) riskScore += 4;
-  riskScore = Math.max(0, Math.min(100, Math.round(riskScore)));
+  const declaredSeverity = f.severity;
+
+  /* Lifecycle pipeline runs for every component, with or without a declared
+     severity. Its output is what lets us classify severity-less SBOM rows. */
+  const lifecycle = assessLifecycle({
+    component: f.component,
+    version: f.version,
+    vendor: f.vendor,
+    severity: declaredSeverity,
+    cvss: f.cvss,
+    kev,
+    exploit,
+    uploadedFix: f.fix,
+    uploadedEol: f.eol,
+    uploadedStatus: `${f.status} ${f.blob.slice(0, 400)}`,
+    intel: {
+      latestVersion: intel.latestVersion,
+      fixedVersion: intel.fixedVersion,
+      eolDate: intel.eolDate,
+      supportEndDate: intel.supportEndDate,
+      advisoryIds: intel.advisoryIds,
+      source: intel.source,
+      updatedAt: intel.updatedAt,
+    },
+  });
+
+  /* ---------------------------------------------------------------------------
+     Multi-factor severity classification.
+     Severity is NEVER taken from a single column. Every available SBOM signal
+     contributes weighted points; the total is banded into a severity. A declared
+     severity is one strong factor among many — it sets a floor, and the other
+     factors can escalate above it. Rows with no severity column at all are still
+     classified because the remaining factors always produce a score.
+  --------------------------------------------------------------------------- */
+  const factors: SeverityFactor[] = [];
+  const add = (label: string, points: number, detail: string) => {
+    if (points === 0) return;
+    factors.push({ label, points, detail });
+  };
+
+  const declaredPoints =
+    declaredSeverity === "critical" ? 60
+      : declaredSeverity === "high" ? 45
+        : declaredSeverity === "medium" ? 28
+          : declaredSeverity === "low" ? 12
+            : declaredSeverity === "info" ? 4 : 0;
+  add("Declared severity", declaredPoints, `SBOM declares ${declaredSeverity === "none" ? "no severity" : declaredSeverity}`);
+
+  if (f.cvss > 0) add("CVSS base score", Math.round(f.cvss * 6), `CVSS ${f.cvss}`);
+  if (f.cve) add("Known advisory", 8, `Advisory / CVE reference ${f.cve}`);
+  if (intel.advisoryIds?.length) add("External advisories", Math.min(12, intel.advisoryIds.length * 4), `${intel.advisoryIds.length} advisories matched`);
+  if (kev) add("Known exploited (KEV)", 30, "Listed as actively exploited in the wild");
+  if (exploit) add("Public exploit", 18, "Weaponised or public proof-of-concept exists");
+  if (eol) add("End of life / unsupported", 22, "Vendor no longer issues security fixes");
+  if (lifecycle.supportStatus === "Unsupported" || lifecycle.supportStatus === "Legacy Platform")
+    add("Support status", 14, `Lifecycle support status: ${lifecycle.supportStatus}`);
+  if (lifecycle.remediationStatus === "Platform Migration Required") add("Migration required", 12, "Cannot be patched in place");
+  else if (lifecycle.remediationStatus === "Upgrade Required") add("Upgrade required", 10, "Running a past-support release line");
+  if (lifecycle.priority === "Critical") add("Lifecycle priority", 18, "Lifecycle pipeline priority: Critical");
+  else if (lifecycle.priority === "High") add("Lifecycle priority", 12, "Lifecycle pipeline priority: High");
+  else if (lifecycle.priority === "Medium") add("Lifecycle priority", 6, "Lifecycle pipeline priority: Medium");
+  const behind = f.version && lifecycle.latestStableVersion
+    ? cmpVersion(f.version, lifecycle.latestStableVersion) < 0
+    : false;
+  if (behind) add("Version drift", 10, `Behind latest stable ${lifecycle.latestStableVersion}`);
+  else if (OUTDATED_RE.test(f.blob)) add("Version drift", 8, "Row indicates an outdated / update-available state");
+
+  if (!fixAvailable) add("No published fix", 10, "No fixed or latest safe version is known");
+  if (!f.version) add("Missing version", 8, "Version absent — vulnerability matching unreliable");
+  if (!f.vendor) add("Missing supplier", 5, "Supplier / vendor absent — provenance unverifiable");
+  if (!f.license) add("Missing license", 4, "License absent — blocks attestation");
+  else if (GPL_RE.test(f.license)) add("Copyleft license", 4, `Copyleft obligations: ${f.license}`);
+  if (/open|unpatched|not fixed|pending|in progress|unresolved/i.test(f.status))
+    add("Remediation open", 6, `Status: ${f.status}`);
+  if (/internet|public|external|dmz|prod/i.test(f.blob)) add("Exposure", 6, "Row indicates production / external exposure");
+  if (lifecycle.confidence === "Low") add("Low confidence data", 4, "Lifecycle evidence weak — treat conservatively");
+
+  const severityScore = Math.max(0, Math.min(100, factors.reduce((s, x) => s + x.points, 0)));
+
+  const band = (n: number): SevKey => (n >= 75 ? "critical" : n >= 55 ? "high" : n >= 30 ? "medium" : n >= 10 ? "low" : "info");
+  const rank: Record<SevKey, number> = { none: 0, info: 1, low: 2, medium: 3, high: 4, critical: 5 };
+  const banded = band(severityScore);
+  /* declared severity acts as a floor, multi-factor analysis can escalate it */
+  const sev: SevKey = rank[banded] >= rank[declaredSeverity] ? banded : declaredSeverity;
+
+  const severitySource: SeveritySource =
+    declaredSeverity === "none"
+      ? "Derived (multi-factor SBOM analysis)"
+      : sev === declaredSeverity
+        ? "Declared (SBOM) + multi-factor confirmed"
+        : "Escalated (multi-factor SBOM analysis)";
+
+  let riskScore = Math.max(severityScore, Math.round(f.cvss * 10));
+  riskScore = Math.max(0, Math.min(100, riskScore));
+
 
   const patchPriority: VulnRecord["patchPriority"] =
     kev || exploit || sev === "critical" ? "P0" : sev === "high" ? "P1" : sev === "medium" ? "P2" : "P3";
@@ -118,27 +219,6 @@ export function toVulnRecord(id: string, raw: Row, intel: Enrichment = {}): Vuln
 
   const exploitStatus = kev ? "KEV — actively exploited" : exploit ? "Public exploit" : f.cvss >= 9 ? "High likelihood" : "No known exploit";
 
-  const lifecycle = assessLifecycle({
-    component: f.component,
-    version: f.version,
-    vendor: f.vendor,
-    severity: sev,
-    cvss: f.cvss,
-    kev,
-    exploit,
-    uploadedFix: f.fix,
-    uploadedEol: f.eol,
-    uploadedStatus: `${f.status} ${f.blob.slice(0, 400)}`,
-    intel: {
-      latestVersion: intel.latestVersion,
-      fixedVersion: intel.fixedVersion,
-      eolDate: intel.eolDate,
-      supportEndDate: intel.supportEndDate,
-      advisoryIds: intel.advisoryIds,
-      source: intel.source,
-      updatedAt: intel.updatedAt,
-    },
-  });
 
   return {
     id,
@@ -150,6 +230,10 @@ export function toVulnRecord(id: string, raw: Row, intel: Enrichment = {}): Vuln
     cve: f.cve,
     cvss: f.cvss,
     severity: sev,
+    severitySource,
+    declaredSeverity,
+    severityScore,
+    severityFactors: factors.sort((a, b) => b.points - a.points),
     license: f.license,
     fix: f.fix,
     status: f.status,
@@ -304,7 +388,12 @@ export function buildVulnIntel(
   rows: Array<{ id: string; data: Row }>,
   intelMap: Record<string, Enrichment> = {},
 ): VulnIntel {
-  const records = rows.map((r) => toVulnRecord(r.id, r.data, intelMap[intelKey(r.data)] ?? {}));
+  const records = (rows ?? [])
+    .filter((r): r is { id: string; data: Row } => !!r)
+    .map((r, i) => {
+      const data = (r.data ?? {}) as Row;
+      return toVulnRecord(r.id ?? `row-${i}`, data, intelMap[intelKey(data)] ?? {});
+    });
   const counts = emptyCounts();
   for (const r of records) counts[r.severity]++;
 
@@ -499,7 +588,12 @@ export function buildVulnIntel(
     sbomHealthScore,
     vendorTrust,
     critical: records.filter((r) => r.severity === "critical").sort((a, b) => b.cvss - a.cvss),
-    highestCves: sortedByCvss.filter((r) => r.cvss > 0).slice(0, 100),
+    /* Fall back to the multi-factor risk ranking so SBOMs without CVSS columns
+       still populate this view instead of rendering an empty table. */
+    highestCves: (sortedByCvss.some((r) => r.cvss > 0)
+      ? sortedByCvss.filter((r) => r.cvss > 0)
+      : [...records].sort((a, b) => b.severityScore - a.severityScore || b.riskScore - a.riskScore)
+    ).slice(0, 200),
   };
 }
 

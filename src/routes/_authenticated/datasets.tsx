@@ -5,7 +5,16 @@ import { Database, Trash2, Upload, ArrowRight, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
 
 export const Route = createFileRoute("/_authenticated/datasets")({
-  head: () => ({ meta: [{ title: "Datasets — SBOM Workbench" }] }),
+  head: () => ({
+    meta: [
+      { title: "SBOM Datasets — SBOM Workbench" },
+      { name: "description", content: "Manage uploaded SBOM and VAPT datasets, risk scores and active assessments." },
+      { property: "og:title", content: "SBOM Datasets — SBOM Workbench" },
+      { property: "og:description", content: "Manage enterprise SBOM datasets and security assessments." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
   component: DatasetsPage,
 });
 
