@@ -22,6 +22,7 @@ import {
   buildPlatformAnalysis, kpiPredicate,
   type ComponentProfile, type KpiId, type PlatformAnalysis,
 } from "@/lib/platform-intel";
+import { lifecycleDisplayText } from "@/lib/lifecycle-display";
 import {
   exportCsv, exportJson, exportXlsx, inventorySheet, analysisSheets,
   type Sheet,
@@ -304,11 +305,15 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   const riskScore = analysis.overallRisk;
 
-  /* automatic UTI AMC report — rebuilt whenever the inventory changes */
-  const utiReport = useMemo(
-    () => buildUtiReport(active?.name ?? "SBOM", analysis),
-    [active?.name, analysis],
-  );
+  /* automatic SBOM-EwayDMS report — rebuilt whenever the inventory changes */
+  const utiReport = useMemo(() => {
+    const cols = active?.columns?.length
+      ? active.columns
+      : Array.from(new Set(components.flatMap((c) => Object.keys(c.data))));
+    const raw = { columns: cols, rows: components.map((c) => cols.map((k) => String(c.data[k] ?? ""))) };
+    return buildUtiReport(active?.name ?? "SBOM", analysis, raw);
+  }, [active?.name, active?.columns, analysis, components]);
+
 
 
   const riskBand: WorkbenchCtx["riskBand"] =
@@ -644,15 +649,23 @@ export function Sidebar() {
   const { datasets, datasetRiskMap, activeId, setActiveId, deleteDataset } = useWorkbench();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   return (
-    <aside className="hidden w-60 shrink-0 lg:block">
-      <div className="sticky top-[88px] space-y-5">
-        <nav className="space-y-1">
+    <aside className="hidden w-64 shrink-0 lg:block">
+      <div className="sticky top-[84px] space-y-6 rounded-2xl border border-border/60 bg-sidebar/80 p-3 shadow-sm backdrop-blur-xl">
+        <div className="flex items-center gap-3 px-2 pt-1">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+            <ShieldAlert className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="font-display text-sm font-semibold text-sidebar-foreground">UTI AMC</div>
+            <div className="text-[10px] font-medium uppercase text-muted-foreground">SBOM Workbench</div>
+          </div>
+        </div>
+        <nav className="space-y-1 border-t border-sidebar-border/70 pt-3">
           {NAV_ITEMS.map((it) => {
             const active = it.to === "/" ? pathname === "/" : pathname.startsWith(it.to);
             return (
               <Link key={it.to} to={it.to}
-                className={`group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${active ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"}`}>
-                {active && <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r bg-primary" />}
+                className={`group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${active ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/15" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"}`}>
                 <it.icon className="h-4 w-4 shrink-0" />
                 <span className="truncate">{it.label}</span>
               </Link>
@@ -667,7 +680,7 @@ export function Sidebar() {
           </div>
           <div className="space-y-1.5">
             {datasets.length === 0 && (
-              <div className="rounded-xl border border-dashed border-border/60 p-4 text-center text-xs text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border/70 bg-background/50 p-4 text-center text-xs text-muted-foreground">
                 No datasets yet.
               </div>
             )}
@@ -676,8 +689,8 @@ export function Sidebar() {
               const band = info.risk >= 75 ? "bg-severity-critical" : info.risk >= 50 ? "bg-severity-high" : info.risk >= 25 ? "bg-severity-medium" : "bg-severity-low";
               const isActive = activeId === d.id;
               return (
-                <motion.div key={d.id} whileHover={{ x: 2 }}
-                  className={`group rounded-xl border px-2.5 py-2 transition ${isActive ? "border-primary/40 bg-primary/10 shadow-sm shadow-primary/10" : "border-transparent hover:bg-accent/40"}`}>
+                <motion.div key={d.id} whileHover={{ y: -1 }}
+                  className={`group rounded-xl border px-2.5 py-2.5 transition ${isActive ? "border-primary/25 bg-primary/[0.07] shadow-sm" : "border-transparent hover:bg-accent/50"}`}>
                   <div className="flex items-start gap-2">
                     <button onClick={() => setActiveId(d.id)} className="flex flex-1 min-w-0 items-start gap-2 text-left">
                       <Database className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
@@ -719,16 +732,16 @@ export function Header({ userEmail, onSignOut }: { userEmail?: string; onSignOut
   const firstName = userEmail?.split("@")[0] ?? "Analyst";
 
   return (
-    <motion.header initial={{ y: -16, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-      className="sticky top-0 z-30 border-b border-border/60 bg-background/60 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+    <motion.header initial={{ y: -12, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+      className="sticky top-0 z-30 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-[1720px] flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-7">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-severity-info to-primary text-primary-foreground shadow-lg shadow-primary/30">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
             <ShieldAlert className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold leading-tight tracking-tight sm:text-lg">
-              {greeting}, <span className="capitalize">{firstName}</span> 👋
+            <h1 className="font-display truncate text-base font-semibold leading-tight sm:text-lg">
+              {greeting}, <span className="capitalize">{firstName}</span>
             </h1>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
               <span className="flex items-center gap-1"><Layers className="h-3 w-3" /> {datasets.length} dataset{datasets.length === 1 ? "" : "s"}</span>
@@ -745,19 +758,19 @@ export function Header({ userEmail, onSignOut }: { userEmail?: string; onSignOut
           <input ref={fileInputRef} type="file" accept={ACCEPTED_UPLOAD_TYPES} multiple className="hidden"
             onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) void handleFiles(fs, null); }} />
           {active && (
-            <Button onClick={() => void downloadExcel()} variant="outline" size="sm" className="rounded-xl">
+            <Button onClick={() => void downloadExcel()} variant="outline" size="sm" className="rounded-xl border-border/70 bg-card/80 shadow-none">
               <Download className="mr-1 h-4 w-4" /> Export
             </Button>
           )}
           <Button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-            className="rounded-xl bg-gradient-to-r from-primary to-severity-info shadow-lg shadow-primary/30 hover:shadow-primary/50">
+            className="rounded-xl shadow-sm">
             {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
             New dataset
           </Button>
-          <button onClick={onSignOut} title="Sign out"
-            className="rounded-xl p-2 text-muted-foreground transition hover:bg-accent/40 hover:text-foreground">
+          <Button onClick={onSignOut} title="Sign out" aria-label="Sign out" variant="ghost" size="icon"
+            className="rounded-xl text-muted-foreground">
             <LogOut className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
       </div>
     </motion.header>
@@ -1217,7 +1230,7 @@ function ProfileIntel({ profile: p }: { profile: ComponentProfile }) {
     ["License", `${p.license || "Unknown"} (${p.licenseType})`],
     ["CVE", p.cve || "—"],
     ["CVSS", p.cvss ? String(p.cvss) : "—"],
-    ["Lifecycle", p.lifecycleStatus],
+    ["Lifecycle", lifecycleDisplayText(p.lifecycleStatus, p.eolDate, p.eosDate)],
     ["Support", p.supportStatus],
     ["Remediation", p.remediationStatus],
     ["Recommended action", p.recommendedAction],
@@ -1501,39 +1514,39 @@ export function AIPanel() {
   if (aiMinimized) {
     return (
       <aside className="hidden shrink-0 xl:flex" style={{ width: 56 }}>
-        <div className="card-elevated sticky top-[88px] flex h-[calc(100vh-112px)] w-full flex-col items-center border border-border/60 py-4">
-          <button
+        <div className="card-elevated sticky top-[84px] flex h-[calc(100vh-108px)] w-full flex-col items-center border border-border/60 py-4">
+          <Button
             onClick={() => setAiMinimized(false)}
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-severity-info to-primary text-primary-foreground shadow-lg shadow-primary/30 transition hover:scale-105"
+            size="icon" className="h-10 w-10 rounded-xl shadow-sm transition hover:-translate-y-0.5"
             title="Expand AI Security Analyst"
             aria-label="Expand AI Security Analyst"
           >
             <Sparkles className="h-4 w-4" />
-          </button>
+          </Button>
           <div className="mt-2 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground" style={{ writingMode: "vertical-rl" }}>
             Analyst
           </div>
           <div className="mt-1.5 flex h-2 w-2 rounded-full bg-severity-low animate-pulse" />
-          <button
+          <Button
             onClick={() => setAiMinimized(false)}
-            className="mt-auto rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
+            variant="ghost" size="icon" className="mt-auto h-8 w-8 rounded-lg text-muted-foreground"
             title="Expand"
             aria-label="Expand AI panel"
           >
             <ChevronLeft className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
       </aside>
     );
   }
 
   return (
-    <aside className="hidden w-96 shrink-0 xl:flex">
-      <div className="card-elevated sticky top-[88px] flex h-[calc(100vh-112px)] w-full flex-col border border-border/60">
+    <aside className="hidden w-80 shrink-0 2xl:flex">
+      <div className="card-elevated sticky top-[84px] flex h-[calc(100vh-108px)] w-full flex-col border border-border/60">
         {/* Header */}
         <div className="border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
-            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-severity-info to-primary text-primary-foreground shadow-lg shadow-primary/30">
+            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
               <Sparkles className="h-4 w-4" />
               <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-severity-low opacity-75" />
@@ -1552,14 +1565,14 @@ export function AIPanel() {
                 {active ? <>Dataset: <span className="text-foreground font-medium">{active.name}</span></> : "No dataset selected"}
               </div>
             </div>
-            <button
+            <Button
               onClick={() => setAiMinimized(true)}
-              className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
+              variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-muted-foreground"
               title="Minimize AI panel"
               aria-label="Minimize AI panel"
             >
               <ChevronRight className="h-4 w-4" />
-            </button>
+            </Button>
           </div>
           {filterChip && (
             <div className="mt-2 flex items-center gap-2 text-[10px]">

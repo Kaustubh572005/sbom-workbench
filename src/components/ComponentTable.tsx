@@ -4,6 +4,7 @@ import { ArrowUpDown, Download, Table2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkbench, severityConfig } from "@/lib/workbench-shared";
 import type { ComponentProfile } from "@/lib/platform-intel";
+import { lifecycleDisplayText } from "@/lib/lifecycle-display";
 
 type ColKey =
   | "application" | "name" | "version" | "supplier" | "purl" | "cpe" | "license"
@@ -46,7 +47,7 @@ function cellValue(p: ComponentProfile, key: ColKey): string | number {
     case "purl": return p.purl || "—";
     case "cpe": return p.cpe || "—";
     case "license": return p.license ? `${p.license}` : p.licenseType;
-    case "lifecycle": return p.lifecycleStatus || "—";
+    case "lifecycle": return lifecycleDisplayText(p.lifecycleStatus || "—", p.eolDate, p.eosDate);
     case "severity": return p.severity;
     case "cvss": return p.cvss || 0;
     case "cveCount": return cveList(p).length;

@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import {
   useWorkbench, ActiveFilterChip, SearchBar, NoDataset, severityConfig,
-  askAnalyst, useAnimatedCount, EnterpriseKpiGrid, FindingsPanel,
+  askAnalyst, useAnimatedCount, FindingsPanel,
 } from "@/lib/workbench-shared";
 import { ComponentTable } from "@/components/ComponentTable";
 import type { SeverityKey } from "@/lib/workbench-shared";
@@ -18,6 +18,7 @@ import { buildVulnIntel, intelKey, type Enrichment, type GroupRisk, type VulnRec
 import {
   lifecycleTone, supportTone, remediationTone, priorityTone, confidenceTone,
 } from "@/lib/lifecycle-intel";
+import { lifecycleDateLines, lifecycleDisplayText } from "@/lib/lifecycle-display";
 import { enrichThreatIntel } from "@/lib/threat-intel.functions";
 import { DataTable, type Col } from "@/components/VulnTable";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,21 @@ type Tone = SeverityKey;
 function Badge({ text, tone }: { text: string; tone: Tone }) {
   const cfg = severityConfig[tone];
   return <span className={`chip whitespace-nowrap border ${cfg.bg} ${cfg.border} ${cfg.color}`}>{text}</span>;
+}
+
+function LifecycleStatus({ record }: { record: VulnRecord }) {
+  const dates = lifecycleDateLines(record.intel.eolDate, record.intel.supportEndDate);
+  return (
+    <div className="min-w-max space-y-1">
+      <Badge text={record.lifecycle.lifecycleStatus} tone={lifecycleTone[record.lifecycle.lifecycleStatus]} />
+      {dates.map((item) => (
+        <div key={item.kind} className="text-[11px] leading-4">
+          <div className="font-medium">{item.kind} — {item.date}</div>
+          <div className="text-muted-foreground">{item.context}</div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function ScoreTile({ label, value, sub, tone, icon: Icon }: { label: string; value: number | string; sub: string; tone: SeverityKey | "primary"; icon: typeof Gauge }) {
@@ -191,14 +207,15 @@ function VulnPage() {
 
   const toggle = (f: Facet) => setFacet((prev) => (prev === f ? "all" : f));
 
-  const kpis: Array<{ key: Facet; label: string; value: number | string; tone: SeverityKey | "primary"; icon: typeof Shield; glow?: boolean }> = [
-    { key: "all", label: "Total vulnerabilities", value: intel.total, tone: "primary", icon: ShieldAlert },
+  type KpiDef = { key: Facet; label: string; value: number | string; tone: SeverityKey | "primary"; icon: typeof Shield; glow?: boolean; always?: boolean };
+  const allKpis: KpiDef[] = [
+    { key: "all", label: "Components analysed", value: intel.total, tone: "primary", icon: ShieldAlert, always: true },
     { key: "critical", label: "Critical", value: intel.counts.critical, tone: "critical", icon: AlertTriangle, glow: intel.counts.critical > 0 },
     { key: "high", label: "High", value: intel.counts.high, tone: "high", icon: AlertTriangle },
     { key: "medium", label: "Medium", value: intel.counts.medium, tone: "medium", icon: AlertCircle },
     { key: "low", label: "Low", value: intel.counts.low, tone: "low", icon: CheckCircle2 },
     { key: "info", label: "Informational", value: intel.counts.info, tone: "info", icon: Info },
-    { key: "all", label: "Highest CVSS", value: intel.highestCvss || "—", tone: "critical", icon: Activity },
+    { key: "all", label: "Highest CVSS", value: intel.highestCvss || 0, tone: "critical", icon: Activity },
     { key: "apps", label: "Applications at risk", value: intel.appsAtRisk.length, tone: "high", icon: Boxes },
     { key: "vendors", label: "Vendors at risk", value: intel.vendorsAtRisk.length, tone: "high", icon: Building2 },
     { key: "components", label: "Components at risk", value: intel.componentsAtRisk.length, tone: "medium", icon: Package },
@@ -213,6 +230,19 @@ function VulnPage() {
     { key: "unknownLifecycle", label: "Lifecycle unknown", value: intel.unknownLifecycle.length, tone: "info", icon: HelpCircle },
     { key: "exploit", label: "Active exploits", value: intel.activeExploits.length, tone: "critical", icon: Bug, glow: intel.activeExploits.length > 0 },
   ];
+  /* Only keep cards that actually carry data — no empty duplicates. */
+  const kpis = allKpis.filter((k) => k.always || (typeof k.value === "number" ? k.value > 0 : Boolean(k.value)));
+
+  const secondaryIndices = [
+    { l: "Dependency risk", v: intel.dependencyRisk },
+    { l: "Supply chain", v: intel.supplyChainRisk },
+    { l: "Open source", v: intel.openSourceRisk },
+    { l: "Third party", v: intel.thirdPartyRisk },
+    { l: "Multi-CVE comps", v: intel.multiCve.length },
+    { l: "Duplicate packages", v: intel.duplicatePackages },
+    { l: "Missing version", v: intel.missingVersion.length },
+    { l: "Missing supplier", v: intel.missingSupplier.length },
+  ].filter((x) => x.v > 0);
 
   /* ---------------------------------- columns --------------------------------- */
   const lifecycleColumns: Col<VulnRecord>[] = [
@@ -226,8 +256,8 @@ function VulnPage() {
         : <span className="text-muted-foreground">Unconfirmed</span>,
     },
     {
-      key: "lifecycleStatus", label: "Lifecycle status", value: (r) => r.lifecycle.lifecycleStatus, filterable: true,
-      render: (r) => <Badge text={r.lifecycle.lifecycleStatus} tone={lifecycleTone[r.lifecycle.lifecycleStatus]} />,
+      key: "lifecycleStatus", label: "Lifecycle status", value: (r) => lifecycleDisplayText(r.lifecycle.lifecycleStatus, r.intel.eolDate, r.intel.supportEndDate), filterable: true,
+      render: (r) => <LifecycleStatus record={r} />,
     },
     {
       key: "supportStatus", label: "Support status", value: (r) => r.lifecycle.supportStatus, filterable: true,
@@ -265,6 +295,11 @@ function VulnPage() {
     { key: "cvss", label: "CVSS", value: (r) => r.cvss, align: "right", mono: true },
     { key: "published", label: "Published", value: (r) => r.published },
     { key: "severity", label: "Severity", value: (r) => r.severity, render: (r) => <SevChip sev={r.severity} />, filterable: true },
+    { key: "severitySource", label: "Severity basis", value: (r) => r.severitySource, filterable: true,
+      render: (r) => <Badge text={r.severitySource} tone={r.severitySource.startsWith("Declared") ? "info" : r.severitySource.startsWith("Escalated") ? "high" : "medium"} /> },
+    { key: "severityScore", label: "Severity score", value: (r) => r.severityScore, align: "right", mono: true },
+    { key: "severityFactors", label: "Classification factors",
+      value: (r) => r.severityFactors.map((x) => `${x.label} +${x.points}`).join(", ") || "No contributing signals" },
     ...lifecycleColumns.filter((c) => c.key !== "component" && c.key !== "version"),
     {
       key: "exploitStatus", label: "Exploit status", value: (r) => r.exploitStatus,
@@ -296,10 +331,26 @@ function VulnPage() {
 
   const expandRecord = (r: VulnRecord) => (
     <div className="grid gap-3 text-xs md:grid-cols-2">
+      <div className="space-y-1.5 md:col-span-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Severity classification — {r.severitySource} · score {r.severityScore}/100
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {r.severityFactors.length === 0
+            ? <span className="text-muted-foreground">No contributing signals present in this row.</span>
+            : r.severityFactors.map((x) => (
+              <span key={x.label} title={x.detail}
+                className="chip border border-border/60 bg-muted/40 text-foreground">
+                {x.label} +{x.points}
+              </span>
+            ))}
+        </div>
+      </div>
       <div className="space-y-1.5">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Lifecycle & remediation analysis</div>
+
         <div className="flex flex-wrap gap-1.5">
-          <Badge text={r.lifecycle.lifecycleStatus} tone={lifecycleTone[r.lifecycle.lifecycleStatus]} />
+          <LifecycleStatus record={r} />
           <Badge text={r.lifecycle.supportStatus} tone={supportTone[r.lifecycle.supportStatus]} />
           <Badge text={r.lifecycle.remediationStatus} tone={remediationTone[r.lifecycle.remediationStatus]} />
           <Badge text={`Priority ${r.lifecycle.priority}`} tone={priorityTone[r.lifecycle.priority]} />
@@ -386,26 +437,19 @@ function VulnPage() {
         <ScoreTile label="SBOM health" value={intel.sbomHealthScore} sub="Completeness, supplier, license" tone={intel.sbomHealthScore >= 70 ? "low" : "medium"} icon={ShieldCheck} />
       </section>
 
-      {/* Secondary risk indices */}
-      <section className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-8">
-        {[
-          { l: "Dependency risk", v: intel.dependencyRisk },
-          { l: "Supply chain", v: intel.supplyChainRisk },
-          { l: "Open source", v: intel.openSourceRisk },
-          { l: "Third party", v: intel.thirdPartyRisk },
-          { l: "Multi-CVE comps", v: intel.multiCve.length },
-          { l: "Duplicate packages", v: intel.duplicatePackages },
-          { l: "Missing version", v: intel.missingVersion.length },
-          { l: "Missing supplier", v: intel.missingSupplier.length },
-        ].map((x) => (
-          <div key={x.l} className="card-elevated border border-border/60 px-3 py-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{x.l}</div>
-            <div className="mt-1 text-lg font-bold">{x.v}</div>
-          </div>
-        ))}
-      </section>
+      {/* Secondary risk indices — empty indices are hidden */}
+      {secondaryIndices.length > 0 && (
+        <section className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-8">
+          {secondaryIndices.map((x) => (
+            <div key={x.l} className="card-elevated border border-border/60 px-3 py-2.5">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{x.l}</div>
+              <div className="mt-1 text-lg font-bold">{x.v}</div>
+            </div>
+          ))}
+        </section>
+      )}
 
-      {/* KPI grid */}
+      {/* KPI grid — only cards that carry data are rendered */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {kpis.map((k, i) => (
           <KpiTile key={`${k.label}-${i}`} label={k.label} value={k.value} tone={k.tone} icon={k.icon} glow={k.glow}
@@ -413,7 +457,6 @@ function VulnPage() {
         ))}
       </section>
 
-      <EnterpriseKpiGrid />
       <FindingsPanel />
 
       <ActiveFilterChip />

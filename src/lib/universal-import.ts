@@ -277,6 +277,82 @@ async function readArchive(file: File): Promise<ImportResult> {
   };
 }
 
+/* ------------------------------- tar / gzip ------------------------------- */
+async function gunzip(buf: ArrayBuffer): Promise<ArrayBuffer> {
+  const ds = new DecompressionStream("gzip");
+  const stream = new Blob([buf]).stream().pipeThrough(ds);
+  return await new Response(stream).arrayBuffer();
+}
+
+/** Minimal USTAR reader — enough to walk SBOM files out of a .tar/.tar.gz. */
+function untar(buf: ArrayBuffer): { name: string; data: Uint8Array }[] {
+  const view = new Uint8Array(buf);
+  const dec = new TextDecoder();
+  const out: { name: string; data: Uint8Array }[] = [];
+  let off = 0;
+  while (off + 512 <= view.length) {
+    const header = view.subarray(off, off + 512);
+    const name = dec.decode(header.subarray(0, 100)).replace(/\0.*$/, "").trim();
+    if (!name) break;
+    const size = parseInt(dec.decode(header.subarray(124, 136)).replace(/\0.*$/, "").trim() || "0", 8) || 0;
+    const type = String.fromCharCode(header[156] || 48);
+    off += 512;
+    if (type === "0" || type === "\0" || type === "48") out.push({ name, data: view.subarray(off, off + size) });
+    off += Math.ceil(size / 512) * 512;
+  }
+  return out;
+}
+
+async function readTar(file: File): Promise<ImportResult> {
+  const isGz = /\.(gz|tgz)$/i.test(file.name);
+  let buf = await file.arrayBuffer();
+  if (isGz) buf = await gunzip(buf);
+  // a bare .gz of a single SBOM file (not a tar)
+  const entries = /\.(tar|tgz|tar\.gz)$/i.test(file.name) ? untar(buf) : [];
+  if (!entries.length) {
+    const inner = new File([buf], file.name.replace(/\.gz$/i, "") || "sbom.json");
+    const res = await extractFromFile(inner);
+    return { ...res, format: `GZIP (${res.format})`, sourceFile: file.name };
+  }
+  const rows: Record<string, unknown>[] = [];
+  const notes: string[] = [];
+  const formats: string[] = [];
+  for (const e of entries) {
+    if (/^__MACOSX|\/\._|\/$/.test(e.name)) continue;
+    try {
+      const inner = new File([e.data as BlobPart], e.name.split("/").pop() ?? e.name);
+      const res = await extractFromFile(inner);
+      if (res.rows.length) {
+        rows.push(...res.rows.map((r) => ({ ...r, "Source File": inner.name })));
+        formats.push(res.format);
+        notes.push(`${inner.name}: ${res.rows.length} component(s) (${res.format})`);
+      }
+    } catch (err) {
+      notes.push(`${e.name}: ${err instanceof Error ? err.message : "could not be parsed"} — skipped.`);
+    }
+  }
+  return {
+    format: `TAR archive (${Array.from(new Set(formats)).join(", ") || "no SBOM found"})`,
+    rows, columns: columnsOf(rows), notes, sourceFile: file.name,
+  };
+}
+
+/** ODT is a ZIP container — read content.xml and treat it as markup tables. */
+async function readOdt(file: File): Promise<ImportResult> {
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const xml = (await zip.file("content.xml")?.async("string")) ?? "";
+  const text = xml
+    .replace(/<\/text:p>/g, "\n")
+    .replace(/<\/table:table-cell>/g, "\t")
+    .replace(/<\/table:table-row>/g, "\n")
+    .replace(/<[^>]+>/g, "");
+  const matrix = text.split(/\n/).map((l) => l.split("\t").map((c) => c.replace(/\s+/g, " ").trim())).filter((r) => r.some(Boolean));
+  const { rows, notes } = rowsFromTables([matrix]);
+  const finalRows = (rows.length ? rows : rowsFromPlainText(text)).map(normalizeRowKeys);
+  return { format: "OpenDocument text", rows: finalRows, columns: columnsOf(finalRows), notes, sourceFile: file.name };
+}
+
 /* ------------------------------- entry point ------------------------------- */
 /**
  * Detect the carrier format and return normalized rows.
@@ -286,13 +362,9 @@ export async function extractFromFile(file: File): Promise<ImportResult> {
   const name = file.name;
   try {
     if (ZIP_RE.test(name)) return await readArchive(file);
-    if (TAR_RE.test(name)) {
-      return {
-        format: "TAR archive", rows: [], columns: [],
-        notes: ["TAR/GZ archives cannot be expanded in the browser — please upload a ZIP or the SBOM files directly."],
-        sourceFile: name,
-      };
-    }
+    if (TAR_RE.test(name)) return await readTar(file);
+    if (/\.odt$/i.test(name)) return await readOdt(file);
+
     if (SPREADSHEET_RE.test(name)) return await readSpreadsheet(file);
     if (/\.docx$/i.test(name)) return await readDocx(file);
     if (DOC_RE.test(name)) {
