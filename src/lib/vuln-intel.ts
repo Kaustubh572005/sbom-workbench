@@ -25,6 +25,15 @@ export type Enrichment = {
   summary?: string;
   updatedAt?: string;
   source?: string;
+  /* ---- NIST NVD enrichment (CVE identity, scoring and dates) ---- */
+  cveId?: string;
+  cvssScore?: number;
+  cvssVector?: string;
+  cvssSeverity?: string;
+  cvePublished?: string;
+  cveLastModified?: string;
+  exploitPublished?: string;
+  lastUpdated?: string;
 };
 
 /** one weighted signal that contributed to the severity classification */
@@ -94,6 +103,9 @@ const OUTDATED_RE = /outdated|older version|update available|upgrade available|e
 
 export function toVulnRecord(id: string, raw: Row, intel: Enrichment = {}): VulnRecord {
   const f = factsOf(raw);
+  /* NIST NVD enrichment fills gaps the uploaded sheet left blank (never overwrites). */
+  if (!f.cve && intel.cveId) f.cve = intel.cveId;
+  if (!f.cvss && intel.cvssScore) f.cvss = Number(intel.cvssScore) || 0;
   const kev = f.kev || intel.kev === true;
   const exploit = f.exploit || intel.exploitAvailable === true;
   const fixedVersion = f.fix || intel.fixedVersion || "";
@@ -237,7 +249,7 @@ export function toVulnRecord(id: string, raw: Row, intel: Enrichment = {}): Vuln
     license: f.license,
     fix: f.fix,
     status: f.status,
-    published: pick(raw, ["published", "published date", "publisheddate", "date", "detected", "discovered"]),
+    published: pick(raw, ["published", "published date", "publisheddate", "date", "detected", "discovered"]) || intel.cvePublished || "",
     eol,
     kev,
     exploit,
