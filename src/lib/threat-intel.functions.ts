@@ -1,4 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
+import { lookupComponent } from "@/lib/nist-nvd-client";
+import { lookupLifecycleDates } from "@/lib/lifecycle-dates";
 
 /**
  * Live external threat intelligence.
@@ -146,23 +148,36 @@ export const enrichThreatIntel = createServerFn({ method: "POST" })
 
     await mapLimit(data.targets, 8, async (t) => {
       const cve = t.cve.toUpperCase().trim();
-      const isKev = Boolean(cve && kev.has(cve));
-      const [osv, eol] = await Promise.all([
+      const [osv, eol, nvd] = await Promise.all([
         t.component ? osvLookup(t) : Promise.resolve(null),
         t.component ? eolLookup(t.component, t.version) : Promise.resolve(null),
+        cve || t.component ? lookupComponent(t.component, t.version, cve, process.env["NVD_API_KEY"]) : Promise.resolve(null),
       ]);
+      const resolvedCve = cve || nvd?.cveId || "";
+      const isKev = Boolean(resolvedCve && kev.has(resolvedCve.toUpperCase()));
+      const catalog = lookupLifecycleDates(t.component, t.version);
       const sources = ["CISA KEV"];
+      if (nvd) sources.push("NIST NVD");
       if (osv) sources.push("OSV.dev");
       if (eol) sources.push("endoflife.date");
+      if (!eol?.eol && catalog?.eol) sources.push("Lifecycle catalogue");
       out[t.key] = {
         kev: isKev,
         exploitAvailable: isKev,
         fixedVersion: osv?.fixedVersion,
-        latestVersion: eol?.latest,
-        eolDate: eol?.eol,
-        supportEndDate: eol?.support,
+        latestVersion: eol?.latest ?? catalog?.latest,
+        eolDate: eol?.eol ?? catalog?.eol,
+        supportEndDate: eol?.support ?? catalog?.eos,
         advisoryIds: osv?.advisoryIds,
-        summary: osv?.summary,
+        summary: nvd?.description || osv?.summary,
+        cveId: nvd?.cveId,
+        cvssScore: nvd?.cvss,
+        cvssVector: nvd?.cvssVector,
+        cvssSeverity: nvd?.cvssSeverity,
+        cvePublished: nvd?.published,
+        cveLastModified: nvd?.lastModified,
+        exploitPublished: isKev ? nvd?.published : undefined,
+        lastUpdated: nvd?.lastModified,
         updatedAt,
         source: sources.join(" · "),
       };
