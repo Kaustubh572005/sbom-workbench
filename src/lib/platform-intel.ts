@@ -10,6 +10,7 @@ import { assessAll, type ComponentRisk } from "@/lib/sbom-heuristics";
 import { buildVulnIntel, intelKey, type Enrichment, type VulnIntel, type VulnRecord } from "@/lib/vuln-intel";
 import type { SevKey } from "@/lib/risk-intel";
 import { lifecycleDisplayText } from "@/lib/lifecycle-display";
+import { buildNistFinding, type NistFinding } from "@/lib/date-intel";
 
 export type Row = Record<string, unknown>;
 export type Item = { id: string; data: Row };
@@ -293,6 +294,8 @@ export type ComponentProfile = {
   missing: string[];
   kev: boolean;
   exploit: boolean;
+  /** NIST-aligned CVE / lifecycle date intelligence */
+  dates: NistFinding;
   record: VulnRecord;
   risk: ComponentRisk;
 };
