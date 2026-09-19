@@ -22,6 +22,15 @@ export type EnrichResult = Record<
     supportEndDate?: string;
     advisoryIds?: string[];
     summary?: string;
+    /* NIST NVD fields */
+    cveId?: string;
+    cvssScore?: number;
+    cvssVector?: string;
+    cvssSeverity?: string;
+    cvePublished?: string;
+    cveLastModified?: string;
+    exploitPublished?: string;
+    lastUpdated?: string;
     updatedAt: string;
     source: string;
   }
