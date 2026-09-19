@@ -329,7 +329,24 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
     const lic = classifyLicense(rec.license || risk.license);
     const exposure = exposureOf(row, blob);
 
-    let riskScore = Math.max(rec.riskScore, risk.score);
+    /* NIST-weighted date intelligence: CVSS 40% · EOL 30% · exploit 20% · lifecycle 10% */
+    const dates = buildNistFinding({
+      component: rec.component || risk.name,
+      version: rec.version,
+      cve: rec.cve,
+      cvss: rec.cvss,
+      cvssVector: rec.intel.cvssVector,
+      cvePublished: rec.intel.cvePublished || rec.published,
+      exploitPublished: rec.intel.exploitPublished,
+      lastUpdated: rec.intel.lastUpdated || rec.intel.cveLastModified,
+      eolDate: rec.intel.eolDate,
+      eosDate: rec.intel.supportEndDate,
+      kev: rec.kev,
+      exploit: rec.exploit,
+      lifecycleStatus: rec.lifecycle.lifecycleStatus,
+    });
+
+    let riskScore = Math.max(rec.riskScore, risk.score, dates.nistRisk);
     if (exposure === "Internet-facing") riskScore = Math.min(100, riskScore + 8);
     if (rec.lifecycle.supportStatus === "Unsupported") riskScore = Math.min(100, riskScore + 6);
     if (lic.risk === "critical") riskScore = Math.min(100, riskScore + 4);
