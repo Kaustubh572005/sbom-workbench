@@ -249,7 +249,7 @@ export function toVulnRecord(id: string, raw: Row, intel: Enrichment = {}): Vuln
     license: f.license,
     fix: f.fix,
     status: f.status,
-    published: pick(raw, ["published", "published date", "publisheddate", "date", "detected", "discovered"]),
+    published: pick(raw, ["published", "published date", "publisheddate", "date", "detected", "discovered"]) || intel.cvePublished || "",
     eol,
     kev,
     exploit,
