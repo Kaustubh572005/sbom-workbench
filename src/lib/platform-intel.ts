@@ -377,6 +377,7 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
       missing: risk.missing,
       kev: rec.kev,
       exploit: rec.exploit,
+      dates,
       record: rec,
       risk,
     };
