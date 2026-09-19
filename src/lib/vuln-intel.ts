@@ -25,6 +25,15 @@ export type Enrichment = {
   summary?: string;
   updatedAt?: string;
   source?: string;
+  /* ---- NIST NVD enrichment (CVE identity, scoring and dates) ---- */
+  cveId?: string;
+  cvssScore?: number;
+  cvssVector?: string;
+  cvssSeverity?: string;
+  cvePublished?: string;
+  cveLastModified?: string;
+  exploitPublished?: string;
+  lastUpdated?: string;
 };
 
 /** one weighted signal that contributed to the severity classification */
