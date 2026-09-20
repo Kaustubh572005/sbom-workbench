@@ -23,6 +23,9 @@ import { enrichThreatIntel } from "@/lib/threat-intel.functions";
 import { DataTable, type Col } from "@/components/VulnTable";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { TimelineChart } from "@/components/TimelineChart";
+import { buildNistFinding, dateKpis, type NistFinding } from "@/lib/date-intel";
+import { checkCompliance } from "@/lib/compliance-check";
 
 export const Route = createFileRoute("/_authenticated/vulnerabilities")({
   head: () => ({
