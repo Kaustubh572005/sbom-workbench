@@ -641,6 +641,37 @@ function VulnPage() {
 
       {section === "compliance" && (
         <div className="space-y-4">
+          {/* SEBI CSCRF & CERT-In audit readiness derived from NIST dates and scores */}
+          <div className="card-elevated border border-border/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">SEBI CSCRF & CERT-In audit readiness</h3>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{nistCompliance.summary}</p>
+              </div>
+              <div className={`text-2xl font-bold ${nistCompliance.score >= 80 ? "text-severity-low" : nistCompliance.score >= 50 ? "text-severity-medium" : "text-severity-critical"}`}>
+                {nistCompliance.score}/100
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {nistCompliance.controls.map((c) => {
+                const tone: SeverityKey = c.state === "non-compliant" ? "critical" : c.state === "at-risk" ? "medium" : "low";
+                const cfg = severityConfig[tone];
+                const mark = c.state === "compliant" ? "✓" : c.state === "at-risk" ? "⚠️" : "✗";
+                return (
+                  <div key={c.id} className={`rounded-xl border p-3 ${cfg.border} ${cfg.bg}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold">{c.framework} · {c.id} — {c.title}</span>
+                      <span className={`text-sm font-bold ${cfg.color}`}>{mark}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-muted-foreground">{c.requirement}</p>
+                    <p className="mt-1 text-[11px]"><span className="font-semibold">Evidence:</span> {c.evidence}</p>
+                    {c.gap && <p className="mt-0.5 text-[11px]"><span className="font-semibold">Gap:</span> {c.gap}</p>}
+                    <p className="mt-0.5 text-[11px]"><span className="font-semibold">Remediation:</span> {c.remediation}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             {intel.compliance.map((c) => {
               const tone: SeverityKey = c.status === "Violation" ? "critical" : c.status === "At risk" ? "medium" : "low";
