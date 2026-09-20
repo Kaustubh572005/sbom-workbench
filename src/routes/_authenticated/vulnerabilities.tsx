@@ -139,6 +139,50 @@ function VulnPage() {
     [filteredComponents, intelMap],
   );
 
+  /* ---------- NIST-based date intelligence (scores, dates, priorities) ---------- */
+  const dated = useMemo(
+    () =>
+      intel.records.map((r) => ({
+        record: r,
+        component: r.component,
+        finding: buildNistFinding({
+          component: r.component,
+          version: r.version,
+          cve: r.cve,
+          cvss: r.cvss,
+          cvssVector: r.intel.cvssVector,
+          cvePublished: r.intel.cvePublished || r.published,
+          exploitPublished: r.intel.exploitPublished,
+          lastUpdated: r.intel.lastUpdated || r.intel.cveLastModified,
+          eolDate: r.intel.eolDate,
+          eosDate: r.intel.supportEndDate,
+          kev: r.kev,
+          exploit: r.exploit,
+          lifecycleStatus: r.lifecycle.lifecycleStatus,
+        }) as NistFinding,
+      })),
+    [intel.records],
+  );
+
+  const dkpis = useMemo(() => dateKpis(dated), [dated]);
+  const nistCompliance = useMemo(
+    () =>
+      checkCompliance(
+        dated.map((d) => ({
+          component: d.record.component,
+          version: d.record.version,
+          application: d.record.application,
+          license: d.record.license,
+          supplier: d.record.vendor,
+          remediationStatus: d.record.lifecycle.remediationStatus,
+          finding: d.finding,
+        })),
+      ),
+    [dated],
+  );
+
+
+
   /* ---------- automatic live external threat-intelligence enrichment ---------- */
   const runEnrichment = useMemo(() => {
     return async (records: VulnRecord[], silent: boolean) => {
