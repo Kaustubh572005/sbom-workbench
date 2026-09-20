@@ -504,6 +504,33 @@ function VulnPage() {
         ))}
       </section>
 
+      {/* Date intelligence KPIs — NIST publication and lifecycle milestones */}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        {[
+          { l: "Critical CVEs", v: dkpis.criticalCount.toLocaleString(), s: dkpis.newestCve ? `Newest ${dkpis.newestCve.date}` : "No dated CVE", tone: "text-severity-critical" },
+          { l: "Days since newest CVE", v: dkpis.daysSinceNewestCve != null ? `${dkpis.daysSinceNewestCve}d` : "—", s: dkpis.newestCve ? `${dkpis.newestCve.id} · ${dkpis.newestCve.component}` : "—", tone: "text-severity-high" },
+          { l: "Oldest CVE", v: dkpis.oldestCve?.date ?? "—", s: dkpis.oldestCve ? `${dkpis.oldestCve.id} · ${dkpis.oldestCve.component}` : "No dated CVE", tone: "text-foreground" },
+          { l: "Past EOL", v: dkpis.pastEolCount.toLocaleString(), s: `Avg ${dkpis.avgDaysPastEol.toLocaleString()} days overdue`, tone: "text-severity-critical" },
+          { l: "Approaching EOL", v: dkpis.approachingEolCount.toLocaleString(), s: `Avg ${dkpis.avgDaysToEol.toLocaleString()} days remaining`, tone: "text-severity-medium" },
+          { l: "Latest exploit", v: dkpis.latestExploit?.date ?? "—", s: dkpis.latestExploit ? `${dkpis.latestExploit.id} · ${dkpis.latestExploit.component}` : "No dated exploit", tone: "text-severity-high" },
+        ].map((k) => (
+          <div key={k.l} className="card-elevated border border-border/60 px-3 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{k.l}</div>
+            <div className={`mt-1 text-lg font-bold ${k.tone}`}>{k.v}</div>
+            <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={k.s}>{k.s}</div>
+          </div>
+        ))}
+      </section>
+
+      {/* Remediation SLA band (P0 0–5d · P1 5–30d) */}
+      <section className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
+        <span className="chip border border-severity-critical/40 bg-severity-critical/15 text-severity-critical">P0 · remediate in 5 days · {dkpis.p0Count}</span>
+        <span className="chip border border-severity-high/40 bg-severity-high/15 text-severity-high">P1 · 30 days · {dkpis.p1Count}</span>
+        <span className="chip border border-border bg-muted/40 text-muted-foreground">Average vulnerability age · {dkpis.avgCveAgeDays.toLocaleString()} days</span>
+      </section>
+
+      <TimelineChart findings={dated.map((d) => d.finding)} />
+
       <FindingsPanel />
 
       <ActiveFilterChip />
