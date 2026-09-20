@@ -9,9 +9,6 @@ import { motion } from "framer-motion";
 import { ShieldAlert, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/auth")({
-  // Sign-in state lives only in the browser — rendering it on the server causes
-  // a hydration mismatch, so this route is client-rendered.
-  ssr: false,
   head: () => ({
     meta: [
       { title: "Sign in — SBOM Workbench" },
