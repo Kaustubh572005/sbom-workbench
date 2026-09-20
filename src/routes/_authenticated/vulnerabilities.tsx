@@ -660,7 +660,7 @@ function VulnPage() {
                 return (
                   <div key={c.id} className={`rounded-xl border p-3 ${cfg.border} ${cfg.bg}`}>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold">{c.framework} · {c.id} — {c.title}</span>
+                      <span className="text-xs font-semibold">{c.framework} · {c.id}</span>
                       <span className={`text-sm font-bold ${cfg.color}`}>{mark}</span>
                     </div>
                     <p className="mt-1 text-[11px] text-muted-foreground">{c.requirement}</p>
