@@ -10,7 +10,6 @@ import { assessAll, type ComponentRisk } from "@/lib/sbom-heuristics";
 import { buildVulnIntel, intelKey, type Enrichment, type VulnIntel, type VulnRecord } from "@/lib/vuln-intel";
 import type { SevKey } from "@/lib/risk-intel";
 import { lifecycleDisplayText } from "@/lib/lifecycle-display";
-import { buildNistFinding, type NistFinding } from "@/lib/date-intel";
 
 export type Row = Record<string, unknown>;
 export type Item = { id: string; data: Row };
@@ -294,8 +293,6 @@ export type ComponentProfile = {
   missing: string[];
   kev: boolean;
   exploit: boolean;
-  /** NIST-aligned CVE / lifecycle date intelligence */
-  dates: NistFinding;
   record: VulnRecord;
   risk: ComponentRisk;
 };
@@ -329,24 +326,7 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
     const lic = classifyLicense(rec.license || risk.license);
     const exposure = exposureOf(row, blob);
 
-    /* NIST-weighted date intelligence: CVSS 40% · EOL 30% · exploit 20% · lifecycle 10% */
-    const dates = buildNistFinding({
-      component: rec.component || risk.name,
-      version: rec.version,
-      cve: rec.cve,
-      cvss: rec.cvss,
-      cvssVector: rec.intel.cvssVector,
-      cvePublished: rec.intel.cvePublished || rec.published,
-      exploitPublished: rec.intel.exploitPublished,
-      lastUpdated: rec.intel.lastUpdated || rec.intel.cveLastModified,
-      eolDate: rec.intel.eolDate,
-      eosDate: rec.intel.supportEndDate,
-      kev: rec.kev,
-      exploit: rec.exploit,
-      lifecycleStatus: rec.lifecycle.lifecycleStatus,
-    });
-
-    let riskScore = Math.max(rec.riskScore, risk.score, dates.nistRisk);
+    let riskScore = Math.max(rec.riskScore, risk.score);
     if (exposure === "Internet-facing") riskScore = Math.min(100, riskScore + 8);
     if (rec.lifecycle.supportStatus === "Unsupported") riskScore = Math.min(100, riskScore + 6);
     if (lic.risk === "critical") riskScore = Math.min(100, riskScore + 4);
@@ -369,7 +349,7 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
       hash: pickField(row, ["hash", "sha256", "sha1", "md5", "checksum", "digest"]),
       application: rec.application,
       cve: rec.cve,
-      cvss: dates.cvss,
+      cvss: rec.cvss,
       severity: rec.severity === "none" ? risk.severity : rec.severity,
       estimated: risk.estimated,
       estimatedConfidence: risk.confidence,
@@ -380,8 +360,8 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
       recommendedAction: rec.lifecycle.recommendedAction,
       targetVersion: rec.lifecycle.targetVersion,
       latestVersion: rec.lifecycle.latestStableVersion || rec.latestSafeVersion,
-      eolDate: dates.eolDate,
-      eosDate: dates.eosDate,
+      eolDate: rec.intel.eolDate ?? "",
+      eosDate: rec.intel.supportEndDate ?? "",
       priority: rec.lifecycle.priority,
       confidence: rec.lifecycle.confidence,
       evidenceSource: rec.lifecycle.evidenceSource,
@@ -394,7 +374,6 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
       missing: risk.missing,
       kev: rec.kev,
       exploit: rec.exploit,
-      dates,
       record: rec,
       risk,
     };

@@ -16,7 +16,7 @@ const Checkbox = React.forwardRef<
     )}
     {...props}
   >
-    <CheckboxPrimitive.Indicator data-slot="checkbox-indicator" className={cn("grid place-content-center text-current data-[state=checked]:animate-in data-[state=checked]:zoom-in-75")}>
+    <CheckboxPrimitive.Indicator className={cn("grid place-content-center text-current")}>
       <Check className="h-4 w-4" />
     </CheckboxPrimitive.Indicator>
   </CheckboxPrimitive.Root>

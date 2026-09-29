@@ -23,9 +23,6 @@ import { enrichThreatIntel } from "@/lib/threat-intel.functions";
 import { DataTable, type Col } from "@/components/VulnTable";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { TimelineChart } from "@/components/TimelineChart";
-import { buildNistFinding, dateKpis, type NistFinding } from "@/lib/date-intel";
-import { checkCompliance } from "@/lib/compliance-check";
 
 export const Route = createFileRoute("/_authenticated/vulnerabilities")({
   head: () => ({
@@ -138,50 +135,6 @@ function VulnPage() {
     () => buildVulnIntel(filteredComponents.map((c) => ({ id: c.id, data: c.data })), intelMap),
     [filteredComponents, intelMap],
   );
-
-  /* ---------- NIST-based date intelligence (scores, dates, priorities) ---------- */
-  const dated = useMemo(
-    () =>
-      intel.records.map((r) => ({
-        record: r,
-        component: r.component,
-        finding: buildNistFinding({
-          component: r.component,
-          version: r.version,
-          cve: r.cve,
-          cvss: r.cvss,
-          cvssVector: r.intel.cvssVector,
-          cvePublished: r.intel.cvePublished || r.published,
-          exploitPublished: r.intel.exploitPublished,
-          lastUpdated: r.intel.lastUpdated || r.intel.cveLastModified,
-          eolDate: r.intel.eolDate,
-          eosDate: r.intel.supportEndDate,
-          kev: r.kev,
-          exploit: r.exploit,
-          lifecycleStatus: r.lifecycle.lifecycleStatus,
-        }) as NistFinding,
-      })),
-    [intel.records],
-  );
-
-  const dkpis = useMemo(() => dateKpis(dated), [dated]);
-  const nistCompliance = useMemo(
-    () =>
-      checkCompliance(
-        dated.map((d) => ({
-          component: d.record.component,
-          version: d.record.version,
-          application: d.record.application,
-          license: d.record.license,
-          supplier: d.record.vendor,
-          remediationStatus: d.record.lifecycle.remediationStatus,
-          finding: d.finding,
-        })),
-      ),
-    [dated],
-  );
-
-
 
   /* ---------- automatic live external threat-intelligence enrichment ---------- */
   const runEnrichment = useMemo(() => {
@@ -504,33 +457,6 @@ function VulnPage() {
         ))}
       </section>
 
-      {/* Date intelligence KPIs — NIST publication and lifecycle milestones */}
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-        {[
-          { l: "Critical CVEs", v: dkpis.criticalCount.toLocaleString(), s: dkpis.newestCve ? `Newest ${dkpis.newestCve.date}` : "No dated CVE", tone: "text-severity-critical" },
-          { l: "Days since newest CVE", v: dkpis.daysSinceNewestCve != null ? `${dkpis.daysSinceNewestCve}d` : "—", s: dkpis.newestCve ? `${dkpis.newestCve.id} · ${dkpis.newestCve.component}` : "—", tone: "text-severity-high" },
-          { l: "Oldest CVE", v: dkpis.oldestCve?.date ?? "—", s: dkpis.oldestCve ? `${dkpis.oldestCve.id} · ${dkpis.oldestCve.component}` : "No dated CVE", tone: "text-foreground" },
-          { l: "Past EOL", v: dkpis.pastEolCount.toLocaleString(), s: `Avg ${dkpis.avgDaysPastEol.toLocaleString()} days overdue`, tone: "text-severity-critical" },
-          { l: "Approaching EOL", v: dkpis.approachingEolCount.toLocaleString(), s: `Avg ${dkpis.avgDaysToEol.toLocaleString()} days remaining`, tone: "text-severity-medium" },
-          { l: "Latest exploit", v: dkpis.latestExploit?.date ?? "—", s: dkpis.latestExploit ? `${dkpis.latestExploit.id} · ${dkpis.latestExploit.component}` : "No dated exploit", tone: "text-severity-high" },
-        ].map((k) => (
-          <div key={k.l} className="card-elevated border border-border/60 px-3 py-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{k.l}</div>
-            <div className={`mt-1 text-lg font-bold ${k.tone}`}>{k.v}</div>
-            <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={k.s}>{k.s}</div>
-          </div>
-        ))}
-      </section>
-
-      {/* Remediation SLA band (P0 0–5d · P1 5–30d) */}
-      <section className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
-        <span className="chip border border-severity-critical/40 bg-severity-critical/15 text-severity-critical">P0 · remediate in 5 days · {dkpis.p0Count}</span>
-        <span className="chip border border-severity-high/40 bg-severity-high/15 text-severity-high">P1 · 30 days · {dkpis.p1Count}</span>
-        <span className="chip border border-border bg-muted/40 text-muted-foreground">Average vulnerability age · {dkpis.avgCveAgeDays.toLocaleString()} days</span>
-      </section>
-
-      <TimelineChart findings={dated.map((d) => d.finding)} />
-
       <FindingsPanel />
 
       <ActiveFilterChip />
@@ -641,37 +567,6 @@ function VulnPage() {
 
       {section === "compliance" && (
         <div className="space-y-4">
-          {/* SEBI CSCRF & CERT-In audit readiness derived from NIST dates and scores */}
-          <div className="card-elevated border border-border/60 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold">SEBI CSCRF & CERT-In audit readiness</h3>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">{nistCompliance.summary}</p>
-              </div>
-              <div className={`text-2xl font-bold ${nistCompliance.score >= 80 ? "text-severity-low" : nistCompliance.score >= 50 ? "text-severity-medium" : "text-severity-critical"}`}>
-                {nistCompliance.score}/100
-              </div>
-            </div>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {nistCompliance.controls.map((c) => {
-                const tone: SeverityKey = c.state === "non-compliant" ? "critical" : c.state === "at-risk" ? "medium" : "low";
-                const cfg = severityConfig[tone];
-                const mark = c.state === "compliant" ? "✓" : c.state === "at-risk" ? "⚠️" : "✗";
-                return (
-                  <div key={c.id} className={`rounded-xl border p-3 ${cfg.border} ${cfg.bg}`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold">{c.framework} · {c.id}</span>
-                      <span className={`text-sm font-bold ${cfg.color}`}>{mark}</span>
-                    </div>
-                    <p className="mt-1 text-[11px] text-muted-foreground">{c.requirement}</p>
-                    <p className="mt-1 text-[11px]"><span className="font-semibold">Evidence:</span> {c.evidence}</p>
-                    {c.gap && <p className="mt-0.5 text-[11px]"><span className="font-semibold">Gap:</span> {c.gap}</p>}
-                    <p className="mt-0.5 text-[11px]"><span className="font-semibold">Remediation:</span> {c.remediation}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
           <div className="grid gap-3 md:grid-cols-2">
             {intel.compliance.map((c) => {
               const tone: SeverityKey = c.status === "Violation" ? "critical" : c.status === "At risk" ? "medium" : "low";

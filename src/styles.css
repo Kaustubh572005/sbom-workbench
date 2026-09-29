@@ -192,79 +192,11 @@
 @utility card-hover {
   transition: transform 0.25s ease, box-shadow 0.25s ease;
   &:hover {
-    transform: translateY(-4px);
+    transform: translateY(-2px);
     box-shadow:
-      0 20px 42px -16px color-mix(in oklab, var(--color-foreground) 24%, transparent),
-      0 1px 0 color-mix(in oklab, var(--color-card) 78%, transparent) inset;
+      0 16px 36px -12px rgba(15, 23, 42, 0.24),
+      0 1px 0 rgba(255, 255, 255, 0.7) inset;
   }
-}
-
-@utility page-enter {
-  animation: page-fade-in 300ms ease-out both;
-}
-
-@utility kpi-enter {
-  animation: slide-up 420ms ease-out both;
-}
-
-@utility row-enter {
-  animation: row-fade-in 360ms ease-out both;
-}
-
-@utility severity-pulse {
-  animation: scale-pulse 3s ease-in-out infinite;
-}
-
-@utility pressable {
-  transition: transform 160ms ease, opacity 160ms ease, background-color 200ms ease, color 200ms ease;
-  &:active { transform: scale(0.95); opacity: 0.8; }
-}
-
-@utility filter-active {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  &::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    background: color-mix(in oklab, var(--color-primary) 12%, transparent);
-    animation: filter-sweep 240ms ease-out both;
-  }
-}
-
-@utility glow-high {
-  &:hover {
-    border-color: color-mix(in oklab, var(--color-severity-high) 68%, transparent);
-    box-shadow: 0 12px 36px -14px color-mix(in oklab, var(--color-severity-high) 55%, transparent);
-  }
-}
-
-@utility glow-medium {
-  &:hover {
-    border-color: color-mix(in oklab, var(--color-severity-medium) 68%, transparent);
-    box-shadow: 0 12px 36px -14px color-mix(in oklab, var(--color-severity-medium) 48%, transparent);
-  }
-}
-
-@utility tooltip-enter {
-  animation: tooltip-pop 180ms ease-out both;
-}
-
-@utility loading-dots {
-  &::after {
-    content: "...";
-    display: inline-block;
-    width: 1.1rem;
-    overflow: hidden;
-    vertical-align: bottom;
-    animation: loading-dots 1.2s steps(4, end) infinite;
-  }
-}
-
-@utility status-flash {
-  animation: status-flash 620ms ease-out both;
 }
 
 @utility font-display {
@@ -344,86 +276,6 @@
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
-}
-
-@keyframes page-fade-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes slide-up {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes row-fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes scale-pulse {
-  0%, 88%, 100% { transform: scale(1); }
-  93% { transform: scale(0.95); }
-  97% { transform: scale(1.035); }
-}
-
-@keyframes filter-sweep {
-  from { transform: translateX(-100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-
-@keyframes tooltip-pop {
-  from { opacity: 0; transform: scale(0.96) translateY(3px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
-
-@keyframes loading-progress {
-  0% { transform: scaleX(0); }
-  70% { transform: scaleX(0.82); }
-  100% { transform: scaleX(1); }
-}
-
-@keyframes loading-dots {
-  0% { width: 0; }
-  100% { width: 1.1rem; }
-}
-
-@keyframes status-flash {
-  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-severity-low) 42%, transparent); }
-  55% { box-shadow: 0 0 0 6px color-mix(in oklab, var(--color-severity-low) 10%, transparent); }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
-
-@keyframes checkmark-draw {
-  from { stroke-dashoffset: 24; }
-  to { stroke-dashoffset: 0; }
-}
-
-@keyframes icon-bounce {
-  0%, 100% { transform: translateY(0) scale(1); }
-  45% { transform: translateY(-3px) scale(1.08); }
-}
-
-@keyframes alert-exit {
-  to { opacity: 0; transform: translateX(100%); }
-}
-
-@keyframes border-glow {
-  0%, 100% { border-color: var(--color-border); }
-  50% { border-color: color-mix(in oklab, var(--color-primary) 55%, var(--color-border)); }
-}
-
-.route-progress {
-  transform-origin: left;
-  animation: loading-progress 2s ease-out both;
-}
-
-.copy-confirm { animation: icon-bounce 240ms ease-out both; }
-
-[data-slot="checkbox-indicator"] svg path,
-[data-state="checked"] > span svg path {
-  stroke-dasharray: 24;
-  animation: checkmark-draw 260ms ease-out both;
 }
 
 @utility skeleton {

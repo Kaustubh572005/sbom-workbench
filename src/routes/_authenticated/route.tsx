@@ -1,4 +1,4 @@
-import { createFileRoute, Outlet, redirect, useNavigate, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { WorkbenchProvider, Sidebar, Header, AIPanel, DetailDrawer } from "@/lib/workbench-shared";
@@ -33,32 +33,17 @@ function AuthenticatedLayout() {
 
   return (
     <WorkbenchProvider>
-      <AuthenticatedShell userEmail={email} onSignOut={() => void onSignOut()} />
-    </WorkbenchProvider>
-  );
-}
-
-function AuthenticatedShell({ userEmail, onSignOut }: { userEmail?: string; onSignOut: () => void }) {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const { loading, uploading } = useWorkbench();
-  const busy = loading || uploading;
-
-  return (
-    <div className="min-h-screen text-foreground">
-      {busy && <div className="route-progress fixed inset-x-0 top-0 z-50 h-0.5 bg-primary" aria-label="Loading" />}
-      <Header userEmail={userEmail} onSignOut={onSignOut} />
-      <div className="mx-auto flex max-w-[1600px] gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <Sidebar />
-        <main key={pathname} className="page-enter min-w-0 flex-1 space-y-6">
-          {loading ? (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Loading workspace">
-              {Array.from({ length: 8 }, (_, i) => <div key={i} className="skeleton h-28 border border-border/40" />)}
-            </div>
-          ) : <Outlet />}
-        </main>
-        <AIPanel />
+      <div className="min-h-screen text-foreground">
+        <Header userEmail={email} onSignOut={() => void onSignOut()} />
+        <div className="mx-auto flex max-w-[1600px] gap-6 px-4 py-6 sm:px-6 lg:px-8">
+          <Sidebar />
+          <main className="min-w-0 flex-1 space-y-6">
+            <Outlet />
+          </main>
+          <AIPanel />
+        </div>
+        <DetailDrawer />
       </div>
-      <DetailDrawer />
-    </div>
+    </WorkbenchProvider>
   );
 }

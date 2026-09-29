@@ -173,7 +173,7 @@ function KpiGrid({ kpis }: { kpis: Kpi[] }) {
     <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
       {kpis.map((k, i) => (
         <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-          className={`card-hover rounded-xl border p-3 ${TONE[k.tone ?? "primary"]}`}>
+          className={`rounded-xl border p-3 ${TONE[k.tone ?? "primary"]}`}>
           <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{k.label}</div>
           <div className="mt-1 truncate text-xl font-bold tabular-nums">{k.value}</div>
           {k.sub && <div className="text-[10px] opacity-70">{k.sub}</div>}
@@ -192,18 +192,18 @@ function Chart({ spec, height = 200 }: { spec: ChartSpec; height?: number }) {
         <ResponsiveContainer width="100%" height="100%">
           {spec.kind === "donut" ? (
             <PieChart>
-              <Pie data={spec.data} dataKey="value" nameKey="name" innerRadius="52%" outerRadius="82%" paddingAngle={2} stroke="none" isAnimationActive animationDuration={800} animationEasing="ease-out">
+              <Pie data={spec.data} dataKey="value" nameKey="name" innerRadius="52%" outerRadius="82%" paddingAngle={2} stroke="none">
                 {spec.data.map((d, i) => <Cell key={i} fill={d.color ?? PALETTE[i % PALETTE.length]} />)}
               </Pie>
-              <RTooltip animationDuration={180} contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
+              <RTooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
             </PieChart>
           ) : (
             <BarChart data={spec.data} margin={{ left: -18, right: 8, top: 4, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-18} textAnchor="end" height={44} />
               <YAxis tick={{ fontSize: 9 }} allowDecimals={false} />
-              <RTooltip animationDuration={180} contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
-              <Bar dataKey="value" radius={[6, 6, 0, 0]} isAnimationActive animationDuration={800} animationEasing="ease-out">
+              <RTooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} />
+              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                 {spec.data.map((d, i) => <Cell key={i} fill={d.color ?? PALETTE[i % PALETTE.length]} />)}
               </Bar>
             </BarChart>
@@ -269,13 +269,13 @@ function DataTable({ spec }: { spec: TableSpec }) {
           </thead>
           <tbody>
             {view.map((row, ri) => (
-              <tr key={ri} style={{ animationDelay: `${Math.min(ri, 12) * 50}ms` }} className="row-enter border-b border-border/40 hover:bg-accent/20">
+              <tr key={ri} className="border-b border-border/40 hover:bg-accent/20">
                 {row.map((cell, ci) => {
                   const sev = String(cell ?? "").toLowerCase();
                   const tone = spec.columns[ci] === "Severity" && TONE[sev] ? TONE[sev] : "";
                   return (
                     <td key={ci} className="max-w-[220px] truncate px-3 py-1.5">
-                       {tone ? <span className={`severity-pulse chip border text-[9px] uppercase ${tone}`}>{String(cell)}</span> : String(cell ?? "")}
+                      {tone ? <span className={`chip border text-[9px] uppercase ${tone}`}>{String(cell)}</span> : String(cell ?? "")}
                     </td>
                   );
                 })}
