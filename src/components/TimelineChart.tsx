@@ -62,6 +62,7 @@ export function TimelineChart({ findings }: { findings: NistFinding[] }) {
             <XAxis dataKey="month" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" interval={1} />
             <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" allowDecimals={false} />
             <Tooltip
+              animationDuration={180}
               contentStyle={{
                 background: "hsl(var(--card))",
                 border: "1px solid hsl(var(--border))",
@@ -71,10 +72,10 @@ export function TimelineChart({ findings }: { findings: NistFinding[] }) {
             />
             <Legend wrapperStyle={{ fontSize: 10 }} />
             <ReferenceLine x={currentMonth} stroke="hsl(var(--primary))" strokeDasharray="4 4" label={{ value: "today", fontSize: 10 }} />
-            <Area type="monotone" dataKey="cves" name="CVEs published" stroke="hsl(var(--primary))" fill="url(#cveArea)" strokeWidth={2} />
-            <Bar dataKey="eolMilestones" name="EOL milestones" fill="hsl(var(--severity-critical))" radius={[3, 3, 0, 0]} barSize={10} />
-            <Line type="monotone" dataKey="criticalCves" name="Critical CVEs" stroke="hsl(var(--severity-critical))" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="exploits" name="Exploits published" stroke="hsl(var(--severity-high))" strokeWidth={2} dot={{ r: 2 }} />
+            <Area type="monotone" dataKey="cves" name="CVEs published" stroke="hsl(var(--primary))" fill="url(#cveArea)" strokeWidth={2} isAnimationActive animationDuration={800} animationEasing="ease-out" />
+            <Bar dataKey="eolMilestones" name="EOL milestones" fill="hsl(var(--severity-critical))" radius={[3, 3, 0, 0]} barSize={10} isAnimationActive animationDuration={800} animationEasing="ease-out" />
+            <Line type="monotone" dataKey="criticalCves" name="Critical CVEs" stroke="hsl(var(--severity-critical))" strokeWidth={2} dot={false} isAnimationActive animationDuration={800} animationBegin={120} />
+            <Line type="monotone" dataKey="exploits" name="Exploits published" stroke="hsl(var(--severity-high))" strokeWidth={2} dot={{ r: 2 }} isAnimationActive animationDuration={800} animationBegin={220} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -85,7 +86,7 @@ export function TimelineChart({ findings }: { findings: NistFinding[] }) {
           { l: "Average days to EOL remaining", v: `${stats.avgToEol.toLocaleString()} days` },
           { l: "Busiest month", v: stats.cluster },
         ].map((s) => (
-          <div key={s.l} className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+           <div key={s.l} className="kpi-enter rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{s.l}</div>
             <div className="mt-0.5 text-sm font-semibold">{s.v}</div>
           </div>

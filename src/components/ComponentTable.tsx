@@ -184,7 +184,7 @@ export function ComponentTable() {
           const count = profiles.filter(f.test).length;
           return (
             <button key={f.key} onClick={() => setDateFilter(active ? "none" : f.key)}
-              className={`chip border text-[10px] font-semibold transition ${active ? "border-primary/50 bg-primary/15 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+              className={`pressable chip border text-[10px] font-semibold transition ${active ? "filter-active border-primary/50 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
               {f.label} · {count.toLocaleString()}
             </button>
           );
@@ -203,7 +203,7 @@ export function ComponentTable() {
                   <button
                     onClick={() => setSort((s) => ({ key: c.key, dir: s.key === c.key && s.dir === "desc" ? "asc" : "desc" }))}
                     className={`flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider transition ${sort.key === c.key ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
-                    {c.label} <ArrowUpDown className="h-3 w-3" />
+                     {c.label} <ArrowUpDown className={`h-3 w-3 transition-transform duration-300 ${sort.key === c.key && sort.dir === "asc" ? "rotate-180" : ""}`} />
                   </button>
                 </th>
               ))}
@@ -211,18 +211,18 @@ export function ComponentTable() {
             </tr>
           </thead>
           <tbody>
-            {sorted.slice(0, limit).map((p) => {
+            {sorted.slice(0, limit).map((p, rowIndex) => {
               const cfg = severityConfig[p.severity];
               const d = p.dates;
               return (
-                <tr key={p.id} onClick={() => setDrawerId(p.id)}
-                  className="cursor-pointer border-b border-border/40 transition hover:bg-accent/25">
+                <tr key={p.id} onClick={() => setDrawerId(p.id)} style={{ animationDelay: `${Math.min(rowIndex, 12) * 50}ms` }}
+                  className="row-enter cursor-pointer border-b border-border/40 transition-colors hover:bg-accent/25">
                   {COLUMNS.map((c) => {
                     const v = cellValue(p, c.key);
                     if (c.key === "severity") {
                       return (
                         <td key={c.key} className="px-3 py-2">
-                          <span className={`chip border ${cfg.bg} ${cfg.border} ${cfg.color} text-[10px]`}>{cfg.label}</span>
+                           <span className={`severity-pulse chip border ${cfg.bg} ${cfg.border} ${cfg.color} text-[10px]`}>{cfg.label}</span>
                         </td>
                       );
                     }
