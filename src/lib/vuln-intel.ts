@@ -7,6 +7,7 @@
  */
 
 import { factsOf, sevOf, type SevKey } from "@/lib/risk-intel";
+import { resolveLifecycleDates } from "@/lib/lifecycle-dates";
 import {
   assessLifecycle, cmpVersion, LIFECYCLE_STATUSES, REMEDIATION_STATUSES,
   type LifecycleAssessment, type LifecycleStatus, type RemediationStatus,
@@ -21,6 +22,9 @@ export type Enrichment = {
   latestVersion?: string;
   eolDate?: string;
   supportEndDate?: string;
+  /** where the EOL / EOS dates came from (uploaded file, endoflife.date, curated vendor data) */
+  eolSource?: string;
+  eosSource?: string;
   advisoryIds?: string[];
   summary?: string;
   updatedAt?: string;
@@ -92,8 +96,17 @@ const pick = (row: Row, names: string[]): string => {
 const GPL_RE = /gpl|agpl|lgpl|sspl|cc-by-sa|epl|mpl/i;
 const OUTDATED_RE = /outdated|older version|update available|upgrade available|expired|obsolete/i;
 
-export function toVulnRecord(id: string, raw: Row, intel: Enrichment = {}): VulnRecord {
+export function toVulnRecord(id: string, raw: Row, feedIntel: Enrichment = {}): VulnRecord {
   const f = factsOf(raw);
+  /* EOL / EOS: uploaded dates win, then the live vendor feed, then curated vendor data */
+  const dates = resolveLifecycleDates(raw, f.component, f.version, feedIntel);
+  const intel: Enrichment = {
+    ...feedIntel,
+    eolDate: dates.eol,
+    supportEndDate: dates.eos,
+    eolSource: dates.eolSource,
+    eosSource: dates.eosSource,
+  };
   const kev = f.kev || intel.kev === true;
   const exploit = f.exploit || intel.exploitAvailable === true;
   const fixedVersion = f.fix || intel.fixedVersion || "";
@@ -392,7 +405,7 @@ export function buildVulnIntel(
     .filter((r): r is { id: string; data: Row } => !!r)
     .map((r, i) => {
       const data = (r.data ?? {}) as Row;
-      return toVulnRecord(r.id ?? `row-${i}`, data, intelMap[intelKey(data)] ?? {});
+      return toVulnRecord(r.id ?? `row-${i}`, data, intelMap[intelKey(data)] ?? intelMap[lifeKey(data)] ?? {});
     });
   const counts = emptyCounts();
   for (const r of records) counts[r.severity]++;
@@ -601,6 +614,12 @@ export function buildVulnIntel(
 export function intelKey(row: Row): string {
   const f = factsOf(row);
   return `${f.component.toLowerCase()}|${f.version.toLowerCase()}|${f.cve.toUpperCase()}`;
+}
+
+/** component+version key: lifecycle (EOL/EOS) data is the same for every CVE row of one release */
+export function lifeKey(row: Row): string {
+  const f = factsOf(row);
+  return `life:${f.component.toLowerCase()}|${f.version.toLowerCase()}`;
 }
 
 export { sevOf };

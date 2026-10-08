@@ -56,7 +56,14 @@ type OsvVuln = {
   affected?: Array<{ ranges?: Array<{ events?: Array<{ fixed?: string }> }> }>;
 };
 
-async function osvLookup(t: Target): Promise<{ fixedVersion?: string; advisoryIds?: string[]; summary?: string } | null> {
+const osvCache = new Map<string, Awaited<ReturnType<typeof osvQuery>>>();
+async function osvLookup(t: Target) {
+  const k = `${t.component}|${t.version}|${t.ecosystem ?? ""}`.toLowerCase();
+  if (!osvCache.has(k)) osvCache.set(k, await osvQuery(t));
+  return osvCache.get(k) ?? null;
+}
+
+async function osvQuery(t: Target): Promise<{ fixedVersion?: string; advisoryIds?: string[]; summary?: string } | null> {
   if (!t.component) return null;
   try {
     const body: Record<string, unknown> = { package: { name: t.component } };
@@ -89,36 +96,62 @@ async function osvLookup(t: Target): Promise<{ fixedVersion?: string; advisoryId
   }
 }
 
-const eolCache = new Map<string, { latest?: string; eol?: string; support?: string } | null>();
+type EolCycle = { cycle?: string; latest?: string; eol?: string | boolean; support?: string | boolean };
+/** one fetch per product (all release cycles); the version is matched afterwards */
+const eolCache = new Map<string, EolCycle[] | null>();
+
+/** spellings found in SBOMs → endoflife.date product slug */
+const EOL_SLUGS: Array<[RegExp, string]> = [
+  [/^node(\.?js)?$/, "nodejs"],
+  [/^(microsoft\.?)?\.?net framework$/, "dotnetfx"],
+  [/^(microsoft\.?)?\.?net( core)?$|^dotnet(-core)?$/, "dotnet"],
+  [/^(apache )?tomcat(-embed-core)?$/, "tomcat"],
+  [/^postgres(ql)?$/, "postgresql"],
+  [/^spring-boot(-starter.*)?$/, "spring-boot"],
+  [/^spring(-framework|-core|-web|-webmvc|-context|-beans)?$/, "spring-framework"],
+  [/^(apache http server|apache2?|httpd)$/, "apache"],
+  [/^angular\.?js$/, "angularjs"],
+  [/^(cpython|python3?)$/, "python"],
+  [/^(open)?jdk$|^java$/, "oracle-jdk"],
+  [/^windows server/, "windows-server"],
+  [/^(rhel|red hat enterprise linux)$/, "rhel"],
+];
+
+const eolSlug = (product: string) => {
+  const n = product.toLowerCase().trim();
+  for (const [re, slug] of EOL_SLUGS) if (re.test(n)) return slug;
+  return n.replace(/\s+/g, "-").replace(/[^a-z0-9.-]/g, "");
+};
+
+const asDate = (v: string | boolean | undefined) =>
+  typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
 
 async function eolLookup(product: string, version: string) {
-  const slug = product.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9.-]/g, "");
+  const slug = eolSlug(product);
   if (!slug) return null;
-  if (eolCache.has(slug)) return eolCache.get(slug) ?? null;
-  try {
-    const res = await fetch(`https://endoflife.date/api/${encodeURIComponent(slug)}.json`);
-    if (!res.ok) {
+  if (!eolCache.has(slug)) {
+    try {
+      const res = await fetch(`https://endoflife.date/api/${encodeURIComponent(slug)}.json`);
+      const cycles = res.ok ? ((await res.json()) as EolCycle[]) : null;
+      eolCache.set(slug, Array.isArray(cycles) && cycles.length ? cycles : null);
+    } catch {
       eolCache.set(slug, null);
-      return null;
     }
-    const cycles = (await res.json()) as Array<{ cycle?: string; latest?: string; eol?: string | boolean; support?: string | boolean }>;
-    if (!Array.isArray(cycles) || !cycles.length) {
-      eolCache.set(slug, null);
-      return null;
-    }
-    const major = version.split(".")[0];
-    const match = cycles.find((c) => String(c.cycle ?? "").split(".")[0] === major) ?? cycles[0];
-    const out = {
-      latest: cycles[0]?.latest ? String(cycles[0].latest) : undefined,
-      eol: match?.eol != null && match.eol !== false ? String(match.eol) : undefined,
-      support: match?.support != null && match.support !== false ? String(match.support) : undefined,
-    };
-    eolCache.set(slug, out);
-    return out;
-  } catch {
-    eolCache.set(slug, null);
-    return null;
   }
+  const cycles = eolCache.get(slug);
+  if (!cycles) return null;
+
+  const nums = version.trim().replace(/^[^0-9]*/, "").split(/[^0-9]+/).filter(Boolean);
+  const [major, minor] = nums;
+  // exact release line first (3.11), then the major line (18) — never guess another line's dates
+  const match =
+    (major && minor ? cycles.find((c) => String(c.cycle ?? "") === `${major}.${minor}`) : undefined) ??
+    (major ? cycles.find((c) => String(c.cycle ?? "") === major) : undefined);
+  return {
+    latest: cycles[0]?.latest ? String(cycles[0].latest) : undefined,
+    eol: asDate(match?.eol),
+    support: asDate(match?.support),
+  };
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -137,7 +170,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 export const enrichThreatIntel = createServerFn({ method: "POST" })
   .inputValidator((input: { targets: Target[] }) => {
     if (!input || !Array.isArray(input.targets)) throw new Error("targets required");
-    return { targets: input.targets.slice(0, 120) };
+    return { targets: input.targets.slice(0, 300) };
   })
   .handler(async ({ data }) => {
     const kev = await loadKev();

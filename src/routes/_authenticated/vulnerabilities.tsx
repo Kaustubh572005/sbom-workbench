@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
 import { motion } from "framer-motion";
 import {
   Activity, AlertCircle, AlertTriangle, Boxes, Building2, Bug, Calendar,
@@ -14,12 +13,11 @@ import {
 import { ComponentTable } from "@/components/ComponentTable";
 import type { SeverityKey } from "@/lib/workbench-shared";
 
-import { buildVulnIntel, intelKey, type Enrichment, type GroupRisk, type VulnRecord } from "@/lib/vuln-intel";
+import { buildVulnIntel, type GroupRisk, type VulnRecord } from "@/lib/vuln-intel";
 import {
   lifecycleTone, supportTone, remediationTone, priorityTone, confidenceTone,
 } from "@/lib/lifecycle-intel";
 import { lifecycleDateLines, lifecycleDisplayText } from "@/lib/lifecycle-display";
-import { enrichThreatIntel } from "@/lib/threat-intel.functions";
 import { DataTable, type Col } from "@/components/VulnTable";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -74,12 +72,17 @@ function LifecycleStatus({ record }: { record: VulnRecord }) {
   return (
     <div className="min-w-max space-y-1">
       <Badge text={record.lifecycle.lifecycleStatus} tone={lifecycleTone[record.lifecycle.lifecycleStatus]} />
-      {dates.map((item) => (
-        <div key={item.kind} className="text-[11px] leading-4">
-          <div className="font-medium">{item.kind} — {item.date}</div>
-          <div className="text-muted-foreground">{item.context}</div>
-        </div>
-      ))}
+      {(["EOL", "EOS"] as const).map((kind) => {
+        const item = dates.find((d) => d.kind === kind);
+        return item ? (
+          <div key={kind} className="text-[11px] leading-4">
+            <div className="font-medium">{kind} — {item.date}</div>
+            <div className="text-muted-foreground">{item.context}</div>
+          </div>
+        ) : (
+          <div key={kind} className="text-[11px] leading-4 text-muted-foreground">{kind} — Not published</div>
+        );
+      })}
     </div>
   );
 }
@@ -123,61 +126,14 @@ function KpiTile({ label, value, tone, icon: Icon, active, onClick, glow }: {
 }
 
 function VulnPage() {
-  const { active, filteredComponents, setDrawerId, components } = useWorkbench();
+  const { active, filteredComponents, setDrawerId, components, intelMap, intelAt, enriching, refreshIntel } = useWorkbench();
   const [facet, setFacet] = useState<Facet>("all");
   const [section, setSection] = useState<Section>("all");
-  const [intelMap, setIntelMap] = useState<Record<string, Enrichment>>({});
-  const [enriching, setEnriching] = useState(false);
-  const [intelAt, setIntelAt] = useState<string | null>(null);
-  const enrich = useServerFn(enrichThreatIntel);
 
   const intel = useMemo(
     () => buildVulnIntel(filteredComponents.map((c) => ({ id: c.id, data: c.data })), intelMap),
     [filteredComponents, intelMap],
   );
-
-  /* ---------- automatic live external threat-intelligence enrichment ---------- */
-  const runEnrichment = useMemo(() => {
-    return async (records: VulnRecord[], silent: boolean) => {
-      if (!records.length) return;
-      setEnriching(true);
-      try {
-        const seen = new Set<string>();
-        const targets = [...records]
-          .sort((a, b) => b.riskScore - a.riskScore)
-          .filter((r) => {
-            const k = intelKey(r.raw);
-            if (seen.has(k) || (!r.component && !r.cve)) return false;
-            seen.add(k);
-            return true;
-          })
-          .slice(0, 120)
-          .map((r) => ({ key: intelKey(r.raw), component: r.component, version: r.version, cve: r.cve }));
-        if (!targets.length) return;
-        const res = await enrich({ data: { targets } });
-        setIntelMap((prev) => ({ ...prev, ...res.intel }));
-        setIntelAt(res.updatedAt);
-        if (!silent) toast.success(`Threat intelligence refreshed for ${targets.length} findings`);
-      } catch (e) {
-        if (!silent) toast.error(e instanceof Error ? e.message : "Enrichment failed");
-      } finally {
-        setEnriching(false);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    setIntelMap({});
-    setIntelAt(null);
-  }, [active?.id]);
-
-  useEffect(() => {
-    if (!active || !components.length) return;
-    const base = buildVulnIntel(components.slice(0, 4000).map((c) => ({ id: c.id, data: c.data })));
-    void runEnrichment(base.records, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.id, components.length]);
 
   if (!active) return <NoDataset />;
 
@@ -324,8 +280,9 @@ function VulnPage() {
 
   const eolCols: Col<VulnRecord>[] = [
     ...lifecycleColumns,
-    { key: "eolDate", label: "End of life", value: (r) => r.intel.eolDate ?? "" },
-    { key: "supportEnd", label: "End of support", value: (r) => r.intel.supportEndDate ?? "" },
+    { key: "eolDate", label: "End of life (EOL)", value: (r) => r.intel.eolDate ?? "Not published" },
+    { key: "supportEnd", label: "End of support (EOS)", value: (r) => r.intel.supportEndDate ?? "Not published" },
+    { key: "dateSource", label: "Date source", value: (r) => [r.intel.eolDate && `EOL: ${r.intel.eolSource ?? "—"}`, r.intel.supportEndDate && `EOS: ${r.intel.eosSource ?? "—"}`].filter(Boolean).join(" · ") || "—" },
     { key: "why", label: "Analysis rationale", value: (r) => r.lifecycle.reason },
   ];
 
@@ -422,7 +379,7 @@ function VulnPage() {
             <Satellite className="h-3 w-3" /> {enriching ? "Enriching…" : "Live intel"}
           </span>
           <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs" disabled={enriching}
-            onClick={() => void runEnrichment(intel.records, false)}>
+            onClick={() => { refreshIntel(); toast.success("Refreshing vendor lifecycle and threat intelligence…"); }}>
             <RefreshCw className={`mr-1 h-3.5 w-3.5 ${enriching ? "animate-spin" : ""}`} /> Refresh intelligence
           </Button>
           {askSection("Ask the analyst", `Summarise the vulnerability posture of ${active.name}: critical CVEs, exploitable findings, EOL components and compliance gaps, then give a prioritised action plan.`)}
