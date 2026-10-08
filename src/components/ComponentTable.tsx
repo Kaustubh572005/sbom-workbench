@@ -5,10 +5,11 @@ import { Button } from "@/components/ui/button";
 import { useWorkbench, severityConfig } from "@/lib/workbench-shared";
 import type { ComponentProfile } from "@/lib/platform-intel";
 import { lifecycleDisplayText } from "@/lib/lifecycle-display";
+import { daysToEol } from "@/lib/lifecycle-dates";
 
 type ColKey =
   | "application" | "name" | "version" | "supplier" | "purl" | "cpe" | "license"
-  | "lifecycle" | "severity" | "cvss" | "cveCount" | "exploit" | "risk"
+  | "lifecycle" | "eolDate" | "eosDate" | "severity" | "cvss" | "cveCount" | "exploit" | "risk"
   | "recommendedVersion" | "recommendedAction" | "lastUpdated";
 
 const COLUMNS: Array<{ key: ColKey; label: string; numeric?: boolean; wide?: boolean }> = [
@@ -20,6 +21,8 @@ const COLUMNS: Array<{ key: ColKey; label: string; numeric?: boolean; wide?: boo
   { key: "cpe", label: "CPE", wide: true },
   { key: "license", label: "License" },
   { key: "lifecycle", label: "Lifecycle" },
+  { key: "eolDate", label: "EOL Date" },
+  { key: "eosDate", label: "EOS Date" },
   { key: "severity", label: "Severity" },
   { key: "cvss", label: "CVSS", numeric: true },
   { key: "cveCount", label: "CVE Count", numeric: true },
@@ -48,6 +51,8 @@ function cellValue(p: ComponentProfile, key: ColKey): string | number {
     case "cpe": return p.cpe || "—";
     case "license": return p.license ? `${p.license}` : p.licenseType;
     case "lifecycle": return lifecycleDisplayText(p.lifecycleStatus || "—", p.eolDate, p.eosDate);
+    case "eolDate": return p.eolDate || "Not published";
+    case "eosDate": return p.eosDate || "Not published";
     case "severity": return p.severity;
     case "cvss": return p.cvss || 0;
     case "cveCount": return cveList(p).length;
@@ -139,6 +144,17 @@ export function ComponentTable() {
                       return (
                         <td key={c.key} className="px-3 py-2">
                           <span className={`chip border ${cfg.bg} ${cfg.border} ${cfg.color} text-[10px]`}>{cfg.label}</span>
+                        </td>
+                      );
+                    }
+                    if (c.key === "eolDate" || c.key === "eosDate") {
+                      const raw = c.key === "eolDate" ? p.eolDate : p.eosDate;
+                      const d = daysToEol(raw);
+                      const tone = !raw ? "text-muted-foreground" : d !== null && d < 0 ? "font-semibold text-severity-critical" : d !== null && d <= 90 ? "font-semibold text-severity-medium" : "text-foreground";
+                      return (
+                        <td key={c.key} className={`whitespace-nowrap px-3 py-2 tabular-nums ${tone}`}
+                          title={raw ? (d !== null && d < 0 ? `${-d} days past` : `${d} days remaining`) : "No vendor date published for this release"}>
+                          {raw || "Not published"}
                         </td>
                       );
                     }

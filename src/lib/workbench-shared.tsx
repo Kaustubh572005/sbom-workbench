@@ -14,7 +14,13 @@ import {
   BarChart, Bar,
 } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
-import { extractFromFile, ACCEPTED_UPLOAD_TYPES } from "@/lib/universal-import";
+import { extractFromFile, expandArchives, ACCEPTED_UPLOAD_TYPES } from "@/lib/universal-import";
+import { useServerFn } from "@tanstack/react-start";
+import { enrichThreatIntel } from "@/lib/threat-intel.functions";
+import { enrichRows } from "@/lib/lifecycle-enrich";
+import type { Enrichment } from "@/lib/vuln-intel";
+import { identifyApplication, uniqueDatasetName, withApplication, type AppHint } from "@/lib/app-identity";
+import { exportCombinedFindings, type CombinedSource } from "@/lib/combined-export";
 import { buildUtiReport, type UtiReport } from "@/lib/uti-report";
 import { buildReport, type AnalysisReport } from "@/lib/risk-intel";
 import { AnalysisReportCard } from "@/components/AnalysisReport";
@@ -37,7 +43,7 @@ import {
   Info, X, Package, TrendingUp, TrendingDown, Activity, Bug, Download,
   Building2, Tag, Calendar, FileText, Copy, Edit3, ChevronRight, ChevronLeft, Layers,
   GitBranch, Hash, Shield, FileBarChart, Landmark, ExternalLink, ListChecks, Boxes,
-  LayoutDashboard, LogOut, ArrowRight,
+  LayoutDashboard, LogOut, ArrowRight, CalendarClock,
   Scale, Network, GitCompare,
 } from "lucide-react";
 
@@ -56,6 +62,20 @@ export type Component = {
   content_hash: string;
 };
 export type SeverityKey = "critical" | "high" | "medium" | "low" | "info" | "none";
+
+/** Supabase returns at most 1000 rows per request — page through so large SBOMs are never truncated. */
+async function fetchAllPages<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await page(from, from + 999);
+    if (error) throw new Error(error.message);
+    out.push(...((data ?? []) as T[]));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
 
 async function hashString(s: string): Promise<string> {
   const buf = new TextEncoder().encode(s);
@@ -204,7 +224,7 @@ type WorkbenchCtx = {
   filteredComponents: Component[];
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   searchRef: React.RefObject<HTMLInputElement | null>;
-  handleFile: (file: File, targetDatasetId: string | null) => Promise<void>;
+  handleFile: (file: File, targetDatasetId: string | null, opts?: { hints?: AppHint[]; sourceLabel?: string }) => Promise<{ id: string; name: string } | null>;
   updateCell: (rowId: string, col: string, value: string) => Promise<void>;
   addRow: () => Promise<void>;
   deleteRow: (id: string) => Promise<void>;
@@ -223,6 +243,16 @@ type WorkbenchCtx = {
   uploadHistory: UploadEntry[];
   utiReport: UtiReport;
   exportAnalysis: (fmt: "xlsx" | "csv" | "json") => Promise<void>;
+  /** live vendor lifecycle data (EOL / EOS), shared by every page and export */
+  intelMap: Record<string, Enrichment>;
+  setIntelMap: React.Dispatch<React.SetStateAction<Record<string, Enrichment>>>;
+  enriching: boolean;
+  intelAt: string | null;
+  refreshIntel: () => void;
+  renameDataset: (id: string, name: string) => Promise<void>;
+  /** one download with the findings of several files (default: every dataset) */
+  exportCombined: (ids: string[], fmt: "xlsx" | "csv" | "json") => Promise<void>;
+  combining: boolean;
   exportSection: (name: string, sheet: Sheet, fmt: "xlsx" | "csv" | "json") => Promise<void>;
 };
 
@@ -235,6 +265,9 @@ export type UploadEntry = {
   format: string;
   at: string;
   action: "created" | "appended";
+  /** smart file naming: how the application name was identified */
+  appConfidence?: "High" | "Medium" | "Low";
+  appReason?: string;
 };
 
 
@@ -264,6 +297,12 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const [uploadHistory, setUploadHistory] = useState<UploadEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const [intelMap, setIntelMap] = useState<Record<string, Enrichment>>({});
+  const [intelAt, setIntelAt] = useState<string | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  const [combining, setCombining] = useState(false);
+  const enrichFn = useServerFn(enrichThreatIntel);
+  const [intelNonce, setIntelNonce] = useState(0);
 
   useEffect(() => {
     try {
@@ -286,8 +325,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
   /* ---- V2: automatic platform-wide analysis of every uploaded dataset ---- */
   const analysis = useMemo(
-    () => buildPlatformAnalysis(components.map((c) => ({ id: c.id, data: c.data }))),
-    [components],
+    () => buildPlatformAnalysis(components.map((c) => ({ id: c.id, data: withApplication(c.data, active?.name ?? "") })), intelMap),
+    [components, intelMap, active?.name],
   );
   const profileById = useMemo(
     () => Object.fromEntries(analysis.profiles.map((p) => [p.id, p])) as Record<string, ComponentProfile>,
@@ -351,9 +390,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     setActiveId((prev) => prev && list.some((d) => d.id === prev) ? prev : list[0]?.id ?? null);
     const map: Record<string, { count: number; risk: number }> = {};
     await Promise.all(list.map(async (d) => {
-      const { data: rows } = await supabase.from("components").select("data").eq("dataset_id", d.id);
+      const all = await fetchAllPages<{ data: Record<string, unknown> }>((from, to) =>
+        supabase.from("components").select("data").eq("dataset_id", d.id).order("id").range(from, to)).catch(() => []);
       const sev = detectSeverityColumn(d.columns);
-      const all = (rows ?? []) as { data: Record<string, unknown> }[];
       const counts = { critical: 0, high: 0, medium: 0, low: 0 };
       if (sev) for (const r of all) {
         const k = getSeverityLevel(r.data[sev]);
@@ -376,9 +415,14 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     if (!activeId) { setComponents([]); return; }
     setLoading(true);
     void (async () => {
-      const { data, error } = await supabase.from("components").select("*").eq("dataset_id", activeId).order("created_at");
-      if (error) toast.error(error.message);
-      setComponents(((data ?? []) as unknown) as Component[]);
+      try {
+        const rows = await fetchAllPages<Component>((from, to) =>
+          supabase.from("components").select("*").eq("dataset_id", activeId).order("created_at").order("id").range(from, to));
+        setComponents(rows);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Could not load components");
+        setComponents([]);
+      }
       setLastScan(new Date());
       setLoading(false);
     })();
@@ -395,7 +439,48 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const handleFile = useCallback(async (file: File, targetDatasetId: string | null) => {
+  /* names of datasets, kept in a ref so files of one batch can see each other's names */
+  const datasetsRef = useRef<Dataset[]>([]);
+  datasetsRef.current = datasets;
+
+  const exportCombined = useCallback(async (ids: string[], fmt: "xlsx" | "csv" | "json") => {
+    const chosen = datasets.filter((d) => ids.includes(d.id));
+    if (!chosen.length) { toast.error("Select at least one file"); return; }
+    setCombining(true);
+    const tid = toast.loading(`Preparing combined findings for ${chosen.length} file(s)…`);
+    try {
+      const sources: CombinedSource[] = [];
+      let live: Record<string, Enrichment> = { ...intelMap };
+      for (const d of chosen) {
+        const rows = await fetchAllPages<{ id: string; data: Record<string, unknown> }>((from, to) =>
+          supabase.from("components").select("id,data").eq("dataset_id", d.id).order("created_at").order("id").range(from, to));
+        const items = rows.map((r) => ({ id: r.id, data: withApplication(r.data, d.name) }));
+        toast.loading(`Looking up EOL / EOS dates for ${d.name}…`, { id: tid });
+        await enrichRows(items.map((i) => i.data), live, enrichFn, (patch) => { live = { ...live, ...patch }; });
+        sources.push({
+          application: d.name,
+          sourceFile: d.source_filename ?? d.name,
+          columns: d.columns,
+          analysis: buildPlatformAnalysis(items, live),
+          nameConfidence: uploadHistory.find((u) => u.datasetId === d.id)?.appConfidence,
+        });
+      }
+      setIntelMap((prev) => ({ ...prev, ...live }));
+      await exportCombinedFindings(sources, fmt);
+      toast.success(`Combined findings for ${sources.length} file(s) downloaded`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Combined export failed");
+    } finally {
+      toast.dismiss(tid);
+      setCombining(false);
+    }
+  }, [datasets, intelMap, enrichFn, uploadHistory]);
+
+  const handleFile = useCallback(async (
+    file: File,
+    targetDatasetId: string | null,
+    opts?: { hints?: AppHint[]; sourceLabel?: string },
+  ): Promise<{ id: string; name: string } | null> => {
     setUploading(true);
     try {
       const parsed = await extractFromFile(file);
@@ -405,7 +490,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       toast.info(`Detected ${format} — ${rows.length} component(s) extracted`);
       parsed.notes.slice(0, 6).forEach((nt: string) => toast.message(nt));
 
-      if (!rows.length) { toast.error(`No usable SBOM information found in ${file.name}`); return; }
+      if (!rows.length) { toast.error(`No usable SBOM information found in ${file.name}`); return null; }
 
       // duplicate detection inside the uploaded file itself
       const seen = new Set<string>();
@@ -422,17 +507,23 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
       let datasetId = targetDatasetId;
       let action: UploadEntry["action"] = "appended";
-      let datasetName = datasets.find((d) => d.id === targetDatasetId)?.name ?? "";
+      let datasetName = datasetsRef.current.find((d) => d.id === targetDatasetId)?.name ?? "";
+      let identity: ReturnType<typeof identifyApplication> | null = null;
       if (!datasetId) {
-        datasetName = file.name.replace(/\.[^.]+$/, "");
+        /* smart file naming: name the dataset after the APPLICATION, not the (maybe generic) filename */
+        identity = identifyApplication({ filename: file.name, rows, hints: [...(parsed.hints ?? []), ...(opts?.hints ?? [])] });
+        datasetName = uniqueDatasetName(identity.name, file.name, datasetsRef.current.map((d) => d.name));
         const { data, error } = await supabase.from("datasets").insert({
-          name: datasetName, source_filename: file.name, columns: sheetCols,
+          name: datasetName, source_filename: opts?.sourceLabel ?? file.name, columns: sheetCols,
         }).select().single();
         if (error) throw error;
         datasetId = (data as { id: string }).id;
+        datasetsRef.current = [...datasetsRef.current, data as unknown as Dataset];
         action = "created";
+        if (identity.confidence === "Low") toast.warning(`Could not identify the application in ${file.name}`, { description: `Saved as “${datasetName}”. ${identity.reason}`, duration: 9000 });
+        else toast.message(`${file.name} → ${datasetName}`, { description: identity.reason, duration: 6000 });
       } else {
-        const ds = datasets.find((d) => d.id === datasetId);
+        const ds = datasetsRef.current.find((d) => d.id === datasetId);
         const merged = Array.from(new Set([...(ds?.columns ?? []), ...sheetCols]));
         await supabase.from("datasets").update({ columns: merged }).eq("id", datasetId);
       }
@@ -446,12 +537,13 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         if (insErr) throw insErr;
       }
 
-      const [{ data: dsAll }, { data: comp }] = await Promise.all([
+      const [{ data: dsAll }, comp] = await Promise.all([
         supabase.from("datasets").select("*").order("created_at", { ascending: false }),
-        supabase.from("components").select("*").eq("dataset_id", datasetId!).order("created_at"),
+        fetchAllPages<Component>((from, to) =>
+          supabase.from("components").select("*").eq("dataset_id", datasetId!).order("created_at").order("id").range(from, to)),
       ]);
       setDatasets(((dsAll ?? []) as unknown) as Dataset[]);
-      setComponents(((comp ?? []) as unknown) as Component[]);
+      setComponents(comp);
       setActiveId(datasetId);
       setLastScan(new Date());
       recordUpload({
@@ -463,27 +555,70 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         format,
         at: new Date().toISOString(),
         action,
+        appConfidence: identity?.confidence,
+        appReason: identity?.reason,
       });
       toast.success(`Imported ${rows.length} components from ${file.name}`);
+      return { id: datasetId!, name: datasetName };
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed");
+      return null;
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [datasets, recordUpload]);
+  }, [recordUpload]);
 
   const handleFiles = useCallback(async (files: File[], targetDatasetId: string | null) => {
-    const list = files.filter(Boolean);
-    if (!list.length) return;
-    for (let i = 0; i < list.length; i++) {
-      setUploadProgress({ current: i + 1, total: list.length, name: list[i].name });
-      // first file may create the dataset; the rest append to the same one
-      await handleFile(list[i], i === 0 ? targetDatasetId : null);
+    const picked = files.filter(Boolean);
+    if (!picked.length) return;
+    // appending to an existing dataset keeps files as-is; new uploads unpack ZIP bundles so each app is identified separately
+    const items = targetDatasetId ? picked.map((file) => ({ file, hints: [] as AppHint[], sourceLabel: undefined })) : await expandArchives(picked);
+    const created: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      setUploadProgress({ current: i + 1, total: items.length, name: items[i].file.name });
+      // every file becomes its own application-named dataset, so findings are never mixed up
+      const res = await handleFile(items[i].file, targetDatasetId, { hints: items[i].hints, sourceLabel: items[i].sourceLabel });
+      if (res && !targetDatasetId) created.push(res.id);
     }
     setUploadProgress(null);
-  }, [handleFile]);
+    if (created.length > 1) {
+      const all = datasetsRef.current.map((d) => d.id);
+      toast.success(`${created.length} files imported as separate applications`, {
+        description: "Download every file's findings together in one workbook.",
+        duration: 20000,
+        action: { label: "Download combined findings", onClick: () => void exportCombined(all, "xlsx") },
+      });
+    }
+  }, [handleFile, exportCombined]);
 
+  const renameDataset = useCallback(async (id: string, name: string) => {
+    const clean = name.trim();
+    if (!clean) { toast.error("Name cannot be empty"); return; }
+    const { error } = await supabase.from("datasets").update({ name: clean }).eq("id", id);
+    if (error) { toast.error(error.message); return; }
+    setDatasets((prev) => prev.map((d) => (d.id === id ? { ...d, name: clean } : d)));
+    toast.success("Renamed");
+  }, []);
+
+  /* live vendor lifecycle data (EOL / EOS), CISA KEV and OSV advisories — for every page and export */
+  const loadedKey = `${components[0]?.dataset_id ?? ""}:${components.length}`;
+  useEffect(() => {
+    if (!components.length) return;
+    let cancelled = false;
+    setEnriching(true);
+    void enrichRows(
+      components.slice(0, 20000).map((c) => c.data),
+      intelMap,
+      enrichFn,
+      (patch, at) => { setIntelMap((prev) => ({ ...prev, ...patch })); setIntelAt(at); },
+      () => cancelled,
+    ).finally(() => { if (!cancelled) setEnriching(false); });
+    return () => { cancelled = true; setEnriching(false); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedKey, intelNonce]);
+
+  const refreshIntel = useCallback(() => { setIntelMap({}); setIntelNonce((n) => n + 1); }, []);
 
   const updateCell = useCallback(async (rowId: string, col: string, value: string) => {
     const row = components.find((c) => c.id === rowId);
@@ -629,6 +764,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     aiMinimized, setAiMinimized,
     analysis, profileById, kpiFilter, setKpiFilter, handleFiles, uploadProgress, uploadHistory, utiReport,
     exportAnalysis, exportSection,
+    intelMap, setIntelMap, enriching, intelAt, refreshIntel, renameDataset, exportCombined, combining,
   };
 
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;
@@ -638,6 +774,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 const NAV_ITEMS = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/vulnerabilities", icon: ShieldAlert, label: "Vulnerability Intelligence" },
+  { to: "/lifecycle", icon: CalendarClock, label: "EOL & EOS Dates" },
   { to: "/licenses", icon: Scale, label: "Licenses" },
   { to: "/reports", icon: FileBarChart, label: "Reports" },
   { to: "/sbom", icon: FileSpreadsheet, label: "SBOM" },

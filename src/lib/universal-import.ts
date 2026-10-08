@@ -7,8 +7,9 @@
  */
 import * as XLSX from "xlsx";
 import { parseSbomText, normalizeTabularRows, type ParsedSbom } from "@/lib/sbom-parse";
+import { hintsFromStructuredText, hintsFromTitleLines, type AppHint } from "@/lib/app-identity";
 
-export type ImportResult = ParsedSbom & { sourceFile: string };
+export type ImportResult = ParsedSbom & { sourceFile: string; hints?: AppHint[] };
 
 const SPREADSHEET_RE = /\.(xlsx|xlsm|xlsb|xls|csv|tsv)$/i;
 const DOC_RE = /\.(docx|doc|odt|rtf)$/i;
@@ -25,6 +26,8 @@ const FIELD_ALIASES: Array<[string, RegExp]> = [
   ["Version", /^(version|release|build version|package version|component version|ver)$/i],
   ["Supplier", /^(supplier|vendor|author|publisher|originator|manufacturer|organization|organisation)$/i],
   ["License", /^(license( name| type| id)?|spdx license|licence|licensing)$/i],
+  ["EOS Date", /^(eos|eosl|end[ _-]?of[ _-]?(support|service)( date)?|eos date|support[ _-]?end( date)?|end of support \(eos\))$/i],
+  ["EOL Date", /^(eol|end[ _-]?of[ _-]?life( date)?|eol date|end of life \(eol\))$/i],
   ["Lifecycle Status", /^(lifecycle( status)?|support end|eos|eol|end of life|end of support|support status)$/i],
   ["Severity", /^(severity|criticality|risk level|priority)$/i],
   ["CVE", /^(cve( id)?|vulnerability( id)?|advisory)$/i],
@@ -181,7 +184,18 @@ async function readSpreadsheet(file: File): Promise<ImportResult> {
     rows.push(...usable.map((r) => ({ ...normalizeRowKeys(r), ...(wb.SheetNames.length > 1 ? { Sheet: name } : {}) })));
   }
   const norm = normalizeTabularRows(rows, format);
-  return { ...norm, notes: [...norm.notes, ...notes], sourceFile: file.name };
+  const hints: AppHint[] = [];
+  const title = (wb.Props as { Title?: string } | undefined)?.Title;
+  if (title) hints.push(...hintsFromTitleLines([title], "workbook title"));
+  // title cells above the table, e.g. "SBOM of Pension Fund"
+  const firstSheet = wb.Sheets[wb.SheetNames[0]];
+  if (firstSheet) {
+    const top = XLSX.utils.sheet_to_json<unknown[]>(firstSheet, { header: 1, defval: "", range: 0 }).slice(0, 6)
+      .flat().map((c) => String(c ?? "").trim()).filter(Boolean);
+    hints.push(...hintsFromTitleLines(top, "title cell"));
+  }
+  if (wb.SheetNames.length === 1) hints.push({ text: wb.SheetNames[0], source: "sheet name" });
+  return { ...norm, notes: [...norm.notes, ...notes], sourceFile: file.name, hints };
 }
 
 async function readDocx(file: File): Promise<ImportResult> {
@@ -189,7 +203,9 @@ async function readDocx(file: File): Promise<ImportResult> {
   const { value } = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
   const { rows, notes } = rowsFromTables(tablesFromHtml(value));
   const finalRows = rows.length ? rows : rowsFromPlainText(new DOMParser().parseFromString(value, "text/html").body.textContent ?? "");
+  const docText = new DOMParser().parseFromString(value, "text/html").body.textContent ?? "";
   return {
+    hints: hintsFromTitleLines(docText.split(/\n+/).map((l) => l.trim()).filter(Boolean), "document title"),
     format: "Word document",
     rows: finalRows.map(normalizeRowKeys),
     columns: columnsOf(finalRows.map(normalizeRowKeys)),
@@ -221,6 +237,7 @@ async function readPdf(file: File): Promise<ImportResult> {
   const text = lines.join("\n");
   const rows = rowsFromPlainText(text).map(normalizeRowKeys);
   return {
+    hints: hintsFromTitleLines(lines.filter(Boolean), "document title"),
     format: "PDF document",
     rows,
     columns: columnsOf(rows),
@@ -235,7 +252,9 @@ async function readMarkup(file: File, kind: "html" | "md"): Promise<ImportResult
   const tables = kind === "html" ? tablesFromHtml(text) : tablesFromMarkdown(text);
   const { rows, notes } = rowsFromTables(tables);
   const finalRows = (rows.length ? rows : rowsFromPlainText(text)).map(normalizeRowKeys);
+  const plain = kind === "html" ? (new DOMParser().parseFromString(text, "text/html").body.textContent ?? "") : text;
   return {
+    hints: hintsFromTitleLines(plain.split(/\n+/).map((l) => l.trim()).filter(Boolean), "document title"),
     format: kind === "html" ? "HTML document" : "Markdown document",
     rows: finalRows,
     columns: columnsOf(finalRows),
@@ -390,7 +409,7 @@ export async function extractFromFile(file: File): Promise<ImportResult> {
     const parsed = parseSbomText(text, name);
     if (parsed.rows.length) {
       const rows = parsed.rows.map(normalizeRowKeys);
-      return { ...parsed, rows, columns: columnsOf(rows), sourceFile: name };
+      return { ...parsed, rows, columns: columnsOf(rows), sourceFile: name, hints: hintsFromStructuredText(text) };
     }
     // last resort: recover anything that looks like a component
     const rows = rowsFromPlainText(text).map(normalizeRowKeys);
@@ -408,6 +427,38 @@ export async function extractFromFile(file: File): Promise<ImportResult> {
       sourceFile: name,
     };
   }
+}
+
+/**
+ * A ZIP holding several SBOM files is usually a bundle of different applications
+ * ("pension-fund/bom.json", "wealth-spectrum/bom.json"). Unpack it so every file is
+ * identified and analysed as its own application. A ZIP with one file stays as-is.
+ */
+export type UploadItem = { file: File; hints: AppHint[]; sourceLabel?: string };
+export async function expandArchives(files: File[]): Promise<UploadItem[]> {
+  const out: UploadItem[] = [];
+  for (const f of files) {
+    if (!/\.zip$/i.test(f.name)) { out.push({ file: f, hints: [] }); continue; }
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = await JSZip.loadAsync(await f.arrayBuffer());
+      const entries = Object.values(zip.files).filter((e) =>
+        !e.dir && !/(^|\/)(__MACOSX|\.)/.test(e.name) && !PB_RE.test(e.name) &&
+        /\.(json|cdx|spdx|xml|xlsx|xlsm|xls|csv|tsv|yaml|yml|docx|pdf|html?|md|txt|rdf)$/i.test(e.name));
+      if (entries.length < 2) { out.push({ file: f, hints: [] }); continue; }
+      for (const e of entries) {
+        const parts = e.name.split("/");
+        const base = parts.pop() ?? e.name;
+        const folder = parts.filter(Boolean).pop();
+        out.push({
+          file: new File([await e.async("blob")], base),
+          hints: folder ? [{ text: folder, source: `folder “${folder}” in ${f.name}` }] : [],
+          sourceLabel: `${f.name} › ${e.name}`,
+        });
+      }
+    } catch { out.push({ file: f, hints: [] }); }
+  }
+  return out;
 }
 
 export const ACCEPTED_UPLOAD_TYPES =

@@ -8,6 +8,9 @@
 
 import ExcelJS from "exceljs";
 import type { ComponentProfile, PlatformAnalysis } from "@/lib/platform-intel";
+import { daysToEol } from "@/lib/lifecycle-dates";
+
+const NOT_PUBLISHED = "Not published";
 
 export const ANALYSIS_COLUMNS = [
   "Estimated Severity",
@@ -25,6 +28,8 @@ export const ANALYSIS_COLUMNS = [
   "Latest Version",
   "EOL Date",
   "EOS Date",
+  "Days To EOL",
+  "EOL/EOS Source",
   "Priority",
   "Confidence",
   "Evidence Source",
@@ -49,8 +54,10 @@ export function analysisFields(p: ComponentProfile): Record<string, string | num
     "Recommended Action": p.recommendedAction,
     "Target Version": p.targetVersion,
     "Latest Version": p.latestVersion,
-    "EOL Date": p.eolDate,
-    "EOS Date": p.eosDate,
+    "EOL Date": p.eolDate || NOT_PUBLISHED,
+    "EOS Date": p.eosDate || NOT_PUBLISHED,
+    "Days To EOL": daysToEol(p.eolDate) ?? "",
+    "EOL/EOS Source": [p.eolDate && `EOL: ${p.record.intel.eolSource ?? "—"}`, p.eosDate && `EOS: ${p.record.intel.eosSource ?? "—"}`].filter(Boolean).join(" · ") || "—",
     "Priority": p.priority,
     "Confidence": p.confidence,
     "Evidence Source": p.evidenceSource,
@@ -163,8 +170,8 @@ export function analysisSheets(a: PlatformAnalysis): Sheet[] {
     },
     {
       name: "Lifecycle",
-      columns: ["Component", "Current Version", "Latest Stable", "Lifecycle Status", "Support Status", "Remediation Status", "Recommended Action", "Target Version", "Priority", "Confidence", "Evidence Source"],
-      rows: a.profiles.map((p) => [p.name, p.version, p.latestVersion, p.lifecycleStatus, p.supportStatus, p.remediationStatus, p.recommendedAction, p.targetVersion, p.priority, p.confidence, p.evidenceSource]),
+      columns: ["Component", "Current Version", "Latest Stable", "Lifecycle Status", "EOL Date", "EOS Date", "Days To EOL", "Support Status", "Remediation Status", "Recommended Action", "Target Version", "Priority", "Confidence", "Evidence Source"],
+      rows: a.profiles.map((p) => [p.name, p.version, p.latestVersion, p.lifecycleStatus, p.eolDate || NOT_PUBLISHED, p.eosDate || NOT_PUBLISHED, daysToEol(p.eolDate) ?? "", p.supportStatus, p.remediationStatus, p.recommendedAction, p.targetVersion, p.priority, p.confidence, p.evidenceSource]),
     },
     {
       name: "Licenses",
