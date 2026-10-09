@@ -45,15 +45,9 @@ const DATEISH = /^(\d{4}[-_.]?\d{2}[-_.]?\d{2}|\d{8}|\d{2}[-_.]\d{2}[-_.]\d{4})$
 const stemOf = (filename: string) =>
   filename.replace(/\.(cdx\.zip|sbom\.zip|tar\.gz|spdx\.json|cdx\.json|bom\.json)$/i, "").replace(/\.[^.]+$/, "");
 
-/** Capitalise lowercase / snake_case words; keep brand casing ("WealthSpectrum", "UTI", "EwayDMS"). */
+/** Names are kept exactly as written ("retiredpensionfund", "EEway", "KECMS_Application") — only whitespace is tidied. */
 export function prettifyName(raw: string): string {
-  return raw
-    .replace(/[_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(" ")
-    .map((w) => (/[A-Z]/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
-    .join(" ");
+  return raw.replace(/\s+/g, " ").trim();
 }
 
 /** Strip generic words, versions, dates and copy-markers from a filename. Empty string = filename says nothing. */
@@ -66,7 +60,7 @@ export function nameFromFilename(filename: string): string {
   while (tokens.length && CONNECTORS.has(tokens[0].toLowerCase())) tokens.shift();
   while (tokens.length && CONNECTORS.has(tokens[tokens.length - 1].toLowerCase())) tokens.pop();
   const joined = tokens.join(" ").trim();
-  return joined.length >= 2 && !JUNK_NAMES.test(joined) ? prettifyName(joined) : "";
+  return joined.length >= 2 && !JUNK_NAMES.test(joined) ? joined : "";
 }
 
 const usable = (v: unknown): string => {
@@ -129,11 +123,11 @@ export function hintsFromStructuredText(text: string): AppHint[] {
 /* ------------------------------- identification ------------------------------- */
 type RowLike = Record<string, unknown>;
 
-function dominantApplication(rows: RowLike[]): { name: string; share: number; others: string[]; distinct: number } | null {
+function dominantBy(rows: RowLike[], keyRe: RegExp): { name: string; share: number; others: string[]; distinct: number } | null {
   const counts = new Map<string, { n: number; label: string }>();
   let total = 0;
   for (const r of rows) {
-    const raw = Object.entries(r).find(([k]) => /^(application|app|application name|app name|project|system|service|solution)$/i.test(k.trim()))?.[1];
+    const raw = Object.entries(r).find(([k]) => keyRe.test(k.trim()))?.[1];
     const v = usable(raw);
     if (!v) continue;
     total++;
@@ -145,6 +139,8 @@ function dominantApplication(rows: RowLike[]): { name: string; share: number; ot
   const ranked = [...counts.values()].sort((a, b) => b.n - a.n);
   return { name: ranked[0].label, share: ranked[0].n / total, others: ranked.slice(1, 6).map((e) => e.label), distinct: ranked.length };
 }
+const APP_COL = /^(application|app|application name|app name|project|system|service|solution)$/i;
+const PARENT_COL = /^(parent component|root component|parent|main component)$/i;
 
 const sameName = (a: string, b: string) => a.toLowerCase().replace(/[^a-z0-9]/g, "") === b.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -155,43 +151,45 @@ export function identifyApplication(input: { filename: string; rows: RowLike[]; 
   const sheetHint = hints.find((h) => /^sheet/i.test(h.source));
   const folderHint = hints.find((h) => /^folder/i.test(h.source));
   const fromFolder = folderHint ? nameFromFilename(`${folderHint.text}.zip`) : "";
-  const app = dominantApplication(rows);
+  const app = dominantBy(rows, APP_COL);
+  const parent = dominantBy(rows, PARENT_COL); // the application every component hangs under, e.g. "KECMS_Application"
   const alsoFound = (app?.others ?? []).slice(0, 5);
+  const inside = embedded[0]?.text ?? (app && app.share >= 0.6 ? app.name : parent && parent.share >= 0.8 ? parent.name : "");
 
-  // 1 — name embedded in the document
+  // 1 — a filename that names the application wins: EEway.json → "EEway"
+  if (fromName) {
+    const differs = inside && !sameName(inside, fromName);
+    return { name: fromName, confidence: "High", alsoFound,
+      reason: `The filename names the application${differs ? ` (the file's contents mention “${inside}”)` : ""}.` };
+  }
+  // 2 — generic filename (bom.json, sbom.json …): read the application from inside the file
   if (embedded.length) {
     const h = embedded[0];
-    const agrees = fromName && sameName(fromName, h.text);
     return { name: prettifyName(h.text), confidence: "High", alsoFound,
-      reason: `Read from the file itself (${h.source})${agrees ? " — matches the filename" : fromName ? ` — filename suggested “${fromName}”` : " — filename is generic"}.` };
+      reason: `Filename is generic — application name read from the file itself (${h.source}).` };
   }
-  // 2 — the file's own Application column
   if (app && app.share >= 0.6) {
     return { name: app.name, confidence: app.distinct === 1 ? "High" : "Medium", alsoFound,
-      reason: app.distinct === 1 ? "Every row names this application in the Application column."
-        : `${Math.round(app.share * 100)}% of rows name this application (${app.distinct} applications in the file).` };
+      reason: app.distinct === 1 ? "Filename is generic — every row names this application in the Application column."
+        : `Filename is generic — ${Math.round(app.share * 100)}% of rows name this application (${app.distinct} applications in the file).` };
   }
-  // 3 — filename
-  if (fromName) {
-    return { name: fromName, confidence: "Medium", alsoFound,
-      reason: `Taken from the filename after removing generic words${app ? `; the file also lists ${app.distinct} applications` : ""}.` };
+  if (parent && parent.share >= 0.8) {
+    return { name: parent.name, confidence: "Medium", alsoFound: parent.others,
+      reason: "Filename is generic — taken from the Parent Component that the components belong to." };
   }
-  // 3b — the folder the file sat in (ZIP bundles: "pension-fund/bom.json")
+  // 3 — the folder the file sat in (ZIP bundles: "pension-fund/bom.json")
   if (fromFolder) {
     return { name: fromFolder, confidence: "Medium", alsoFound,
       reason: `Filename is generic — used the folder it came from (${folderHint!.source}).` };
   }
-  // multi-application file with a generic filename
   if (app && app.distinct > 1) {
     return { name: `Multiple applications (${app.distinct})`, confidence: "Medium", alsoFound,
       reason: `Generic filename; the Application column lists ${app.distinct} different applications.` };
   }
-  // 4 — sheet name
-  if (sheetHint) {
+  if (sheetHint && !/^(bom|sbom|sheet\d*)$/i.test(sheetHint.text)) {
     return { name: prettifyName(sheetHint.text), confidence: "Low", alsoFound,
       reason: "Generic filename — used the worksheet name. Please confirm." };
   }
-  // 5 — fallback
   const stem = stemOf(filename).trim() || "Untitled";
   return { name: `Unidentified — ${stem}`, confidence: "Low", alsoFound,
     reason: "Neither the filename nor the file contents name the application. Rename it so findings stay attributable." };
