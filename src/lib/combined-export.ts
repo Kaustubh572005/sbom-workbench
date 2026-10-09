@@ -83,7 +83,7 @@ export function overviewSheet(sources: CombinedSource[]): Sheet {
   const total = { comps: 0, c: 0, h: 0, m: 0, l: 0, past: 0, soon: 0, none: 0, kev: 0 };
   const rows = sources.map((s) => {
     const ps = s.analysis.profiles;
-    const past = ps.filter((p) => (eolOf(p) ?? 1) < 0).length;
+    const past = s.analysis.counts.eol + s.analysis.counts.eos; // identical to the dashboard
     const soon = ps.filter((p) => { const d = eolOf(p); return d !== null && d >= 0 && d <= 90; }).length;
     const none = ps.filter((p) => !p.eolDate && !p.eosDate).length;
     const kev = ps.filter((p) => p.kev).length;
@@ -96,7 +96,7 @@ export function overviewSheet(sources: CombinedSource[]): Sheet {
   rows.push(["ALL FILES", `${sources.length} file(s)`, "", total.comps, total.c, total.h, total.m, total.l, "", "", total.past, total.soon, total.none, total.kev]);
   return {
     name: "Overview",
-    columns: ["Application", "Source File", "Name Confidence", "Components", "Critical", "High", "Medium", "Low", "Risk Score", "Risk Category", "Past EOL", "EOL Within 90 Days", "No EOL/EOS Date", "Known Exploited"],
+    columns: ["Application", "Source File", "Name Confidence", "Components", "Critical", "High", "Medium", "Low", "Risk Score", "Risk Category", "Past EOL / EOS", "EOL Within 90 Days", "No EOL/EOS Date", "Known Exploited"],
     rows,
   };
 }

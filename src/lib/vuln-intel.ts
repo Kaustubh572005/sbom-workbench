@@ -341,16 +341,25 @@ function groupBy(records: VulnRecord[], key: (r: VulnRecord) => string, limit = 
     .slice(0, limit);
 }
 
-export function buildVulnIntel(
+/** every row → one VulnRecord (NIST severity, resolved EOL/EOS dates, risk score). The ONLY place records are made. */
+export function buildVulnRecords(
   rows: Array<{ id: string; data: Row }>,
   intelMap: Record<string, Enrichment> = {},
-): VulnIntel {
-  const records = (rows ?? [])
+): VulnRecord[] {
+  return (rows ?? [])
     .filter((r): r is { id: string; data: Row } => !!r)
     .map((r, i) => {
       const data = (r.data ?? {}) as Row;
       return toVulnRecord(r.id ?? `row-${i}`, data, { ...intelMap[lifeKey(data)], ...intelMap[intelKey(data)] });
     });
+}
+
+export function buildVulnIntel(rows: Array<{ id: string; data: Row }>, intelMap: Record<string, Enrichment> = {}): VulnIntel {
+  return summarizeVuln(buildVulnRecords(rows, intelMap));
+}
+
+/** aggregate any set of records (all, or a filtered subset) — screens never re-score, they only re-aggregate */
+export function summarizeVuln(records: VulnRecord[]): VulnIntel {
   const counts = emptyCounts();
   for (const r of records) counts[r.severity]++;
 

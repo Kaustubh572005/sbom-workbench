@@ -15,12 +15,13 @@ import { enrichThreatIntel } from "@/lib/threat-intel.functions";
 import { enrichRows, mergeIntel } from "@/lib/lifecycle-enrich";
 import { lookupNvd } from "@/lib/nist-nvd.functions";
 import type { Enrichment } from "@/lib/vuln-intel";
+import { postureBand } from "@/lib/nist-scoring";
 import { identifyApplication, uniqueDatasetName, withApplication, type AppHint } from "@/lib/app-identity";
 import { exportCombinedFindings, type CombinedSource } from "@/lib/combined-export";
 import { buildUtiReport, type UtiReport } from "@/lib/uti-report";
 import { buildReport, type AnalysisReport } from "@/lib/risk-intel";
 import { AnalysisReportCard } from "@/components/AnalysisReport";
-import { buildPlatformAnalysis, kpiPredicate, type ComponentProfile, type KpiId, type PlatformAnalysis } from "@/lib/platform-intel";
+import { buildPlatformAnalysis, canonicalRow, kpiPredicate, type ComponentProfile, type KpiId, type PlatformAnalysis } from "@/lib/platform-intel";
 import { lifecycleDisplayText } from "@/lib/lifecycle-display";
 import { exportCsv, exportJson, exportXlsx, inventorySheet, analysisSheets, type Sheet } from "@/lib/export-analysis";
 
@@ -307,11 +308,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
 
 
-  const riskBand: WorkbenchCtx["riskBand"] =
-    riskScore >= 75 ? { label: "CRITICAL", color: "text-severity-critical", desc: "Immediate action required", tone: "critical" } :
-    riskScore >= 50 ? { label: "ELEVATED", color: "text-severity-high", desc: "Prioritize remediation", tone: "high" } :
-    riskScore >= 25 ? { label: "MODERATE", color: "text-severity-medium", desc: "Monitor closely", tone: "medium" } :
-    { label: "HEALTHY", color: "text-severity-low", desc: "Posture is healthy", tone: "low" };
+  const riskBand: WorkbenchCtx["riskBand"] = (() => {
+    const b = postureBand(riskScore);
+    return { label: b.label.toUpperCase(), color: severityConfig[b.tone].color, desc: b.desc, tone: b.tone };
+  })();
 
 
 
@@ -1121,7 +1121,7 @@ const BASE_PROMPTS = [
 
 
 export function AIPanel() {
-  const { active, components, severityFilter, filteredComponents, severityCounts, aiMinimized, setAiMinimized } = useWorkbench();
+  const { active, components, severityFilter, filteredComponents, severityCounts, aiMinimized, setAiMinimized, profileById, riskScore } = useWorkbench();
   const [input, setInput] = useState("");
   const [reports, setReports] = useState<Record<string, AnalysisReport>>({});
 
@@ -1141,7 +1141,7 @@ export function AIPanel() {
   const busy = status === "submitted" || status === "streaming";
 
   // Build per-call dataset context: respect the active filter
-  const contextRows = severityFilter === "all" ? components : filteredComponents;
+  const contextRows = (severityFilter === "all" ? components : filteredComponents).map((c) => ({ ...c, data: canonicalRow(c.data, profileById[c.id]) }));
   const datasetContext = active ? {
     name: active.name + (severityFilter !== "all" ? ` (filtered: ${severityFilter})` : ""),
     columns: active.columns,
@@ -1157,7 +1157,12 @@ export function AIPanel() {
     let report: AnalysisReport | null = null;
     if (active) {
       try {
-        report = buildReport(t, { datasetName: active.name, rows: contextRows.map((c) => c.data) });
+        report = buildReport(t, {
+          datasetName: active.name,
+          rows: contextRows.map((c) => c.data),
+          // whole dataset → quote the platform's own totals so chat and dashboard can never disagree
+          shared: severityFilter === "all" ? { counts: severityCounts, securityScore: Math.max(0, 100 - riskScore) } : undefined,
+        });
       } catch {
         report = null;
       }
