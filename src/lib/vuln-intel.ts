@@ -7,11 +7,9 @@
  */
 
 import { factsOf, sevOf, type SevKey } from "@/lib/risk-intel";
-import { resolveLifecycleDates } from "@/lib/lifecycle-dates";
-import {
-  assessLifecycle, cmpVersion, LIFECYCLE_STATUSES, REMEDIATION_STATUSES,
-  type LifecycleAssessment, type LifecycleStatus, type RemediationStatus,
-} from "@/lib/lifecycle-intel";
+import { daysToEol, resolveLifecycleDates } from "@/lib/lifecycle-dates";
+import { nistRisk, resolveSeverity, type RiskFactor, type ScoreSource } from "@/lib/nist-scoring";
+import { assessLifecycle, LIFECYCLE_STATUSES, REMEDIATION_STATUSES, type LifecycleAssessment, type LifecycleStatus, type RemediationStatus } from "@/lib/lifecycle-intel";
 
 export type Row = Record<string, unknown>;
 
@@ -25,19 +23,17 @@ export type Enrichment = {
   /** where the EOL / EOS dates came from (uploaded file, endoflife.date, curated vendor data) */
   eolSource?: string;
   eosSource?: string;
+  /** NIST NVD: CVSS v3.x base score, vector and dates for the record's CVE(s) */
+  cvss?: number;
+  cvssVector?: string;
+  cvePublished?: string;
   advisoryIds?: string[];
   summary?: string;
   updatedAt?: string;
   source?: string;
 };
 
-/** one weighted signal that contributed to the severity classification */
-export type SeverityFactor = { label: string; points: number; detail: string };
-
-export type SeveritySource =
-  | "Declared (SBOM) + multi-factor confirmed"
-  | "Escalated (multi-factor SBOM analysis)"
-  | "Derived (multi-factor SBOM analysis)";
+export type SeveritySource = ScoreSource;
 
 export type VulnRecord = {
   id: string;
@@ -49,13 +45,13 @@ export type VulnRecord = {
   cve: string;
   cvss: number;
   severity: SevKey;
-  /** how the severity was established (declared, escalated or fully derived) */
+  cvssVector: string;
+  /** where the CVSS score (and so the NIST severity band) came from */
   severitySource: SeveritySource;
+  /** severity label found in the uploaded file — informational, never overrides NIST */
   declaredSeverity: SevKey;
-  /** weighted multi-factor total (0-100) behind the severity band */
-  severityScore: number;
-  /** every signal that contributed, for transparency in UI and exports */
-  severityFactors: SeverityFactor[];
+  /** what makes up the 0-100 risk score, for transparency in UI and exports */
+  riskFactors: RiskFactor[];
   license: string;
   fix: string;
   status: string;
@@ -94,6 +90,7 @@ const pick = (row: Row, names: string[]): string => {
 };
 
 const GPL_RE = /gpl|agpl|lgpl|sspl|cc-by-sa|epl|mpl/i;
+const EXPOSED_RE = /internet|public|external|dmz|edge/i;
 const OUTDATED_RE = /outdated|older version|update available|upgrade available|expired|obsolete/i;
 
 export function toVulnRecord(id: string, raw: Row, feedIntel: Enrichment = {}): VulnRecord {
@@ -114,16 +111,22 @@ export function toVulnRecord(id: string, raw: Row, feedIntel: Enrichment = {}): 
   const fixAvailable = Boolean(fixedVersion || latestSafeVersion);
   const eol = f.eol || Boolean(intel.eolDate) || Boolean(intel.supportEndDate);
 
+  /* NIST scoring: CVSS (NVD → uploaded → vector) decides severity; a declared label is only a fallback */
   const declaredSeverity = f.severity;
+  const nist = resolveSeverity({
+    nvdScore: intel.cvss,
+    uploadedScore: f.cvss,
+    vector: intel.cvssVector || pick(raw, ["cvss vector", "vector string", "cvss3 vector", "cvss v3 vector", "vector"]),
+    declared: declaredSeverity,
+  });
+  const sev: SevKey = nist.severity;
 
-  /* Lifecycle pipeline runs for every component, with or without a declared
-     severity. Its output is what lets us classify severity-less SBOM rows. */
   const lifecycle = assessLifecycle({
     component: f.component,
     version: f.version,
     vendor: f.vendor,
-    severity: declaredSeverity,
-    cvss: f.cvss,
+    severity: sev,
+    cvss: nist.score,
     kev,
     exploit,
     uploadedFix: f.fix,
@@ -140,75 +143,16 @@ export function toVulnRecord(id: string, raw: Row, feedIntel: Enrichment = {}): 
     },
   });
 
-  /* ---------------------------------------------------------------------------
-     Multi-factor severity classification.
-     Severity is NEVER taken from a single column. Every available SBOM signal
-     contributes weighted points; the total is banded into a severity. A declared
-     severity is one strong factor among many — it sets a floor, and the other
-     factors can escalate above it. Rows with no severity column at all are still
-     classified because the remaining factors always produce a score.
-  --------------------------------------------------------------------------- */
-  const factors: SeverityFactor[] = [];
-  const add = (label: string, points: number, detail: string) => {
-    if (points === 0) return;
-    factors.push({ label, points, detail });
-  };
-
-  const declaredPoints =
-    declaredSeverity === "critical" ? 60
-      : declaredSeverity === "high" ? 45
-        : declaredSeverity === "medium" ? 28
-          : declaredSeverity === "low" ? 12
-            : declaredSeverity === "info" ? 4 : 0;
-  add("Declared severity", declaredPoints, `SBOM declares ${declaredSeverity === "none" ? "no severity" : declaredSeverity}`);
-
-  if (f.cvss > 0) add("CVSS base score", Math.round(f.cvss * 6), `CVSS ${f.cvss}`);
-  if (f.cve) add("Known advisory", 8, `Advisory / CVE reference ${f.cve}`);
-  if (intel.advisoryIds?.length) add("External advisories", Math.min(12, intel.advisoryIds.length * 4), `${intel.advisoryIds.length} advisories matched`);
-  if (kev) add("Known exploited (KEV)", 30, "Listed as actively exploited in the wild");
-  if (exploit) add("Public exploit", 18, "Weaponised or public proof-of-concept exists");
-  if (eol) add("End of life / unsupported", 22, "Vendor no longer issues security fixes");
-  if (lifecycle.supportStatus === "Unsupported" || lifecycle.supportStatus === "Legacy Platform")
-    add("Support status", 14, `Lifecycle support status: ${lifecycle.supportStatus}`);
-  if (lifecycle.remediationStatus === "Platform Migration Required") add("Migration required", 12, "Cannot be patched in place");
-  else if (lifecycle.remediationStatus === "Upgrade Required") add("Upgrade required", 10, "Running a past-support release line");
-  if (lifecycle.priority === "Critical") add("Lifecycle priority", 18, "Lifecycle pipeline priority: Critical");
-  else if (lifecycle.priority === "High") add("Lifecycle priority", 12, "Lifecycle pipeline priority: High");
-  else if (lifecycle.priority === "Medium") add("Lifecycle priority", 6, "Lifecycle pipeline priority: Medium");
-  const behind = f.version && lifecycle.latestStableVersion
-    ? cmpVersion(f.version, lifecycle.latestStableVersion) < 0
-    : false;
-  if (behind) add("Version drift", 10, `Behind latest stable ${lifecycle.latestStableVersion}`);
-  else if (OUTDATED_RE.test(f.blob)) add("Version drift", 8, "Row indicates an outdated / update-available state");
-
-  if (!fixAvailable) add("No published fix", 10, "No fixed or latest safe version is known");
-  if (!f.version) add("Missing version", 8, "Version absent — vulnerability matching unreliable");
-  if (!f.vendor) add("Missing supplier", 5, "Supplier / vendor absent — provenance unverifiable");
-  if (!f.license) add("Missing license", 4, "License absent — blocks attestation");
-  else if (GPL_RE.test(f.license)) add("Copyleft license", 4, `Copyleft obligations: ${f.license}`);
-  if (/open|unpatched|not fixed|pending|in progress|unresolved/i.test(f.status))
-    add("Remediation open", 6, `Status: ${f.status}`);
-  if (/internet|public|external|dmz|prod/i.test(f.blob)) add("Exposure", 6, "Row indicates production / external exposure");
-  if (lifecycle.confidence === "Low") add("Low confidence data", 4, "Lifecycle evidence weak — treat conservatively");
-
-  const severityScore = Math.max(0, Math.min(100, factors.reduce((s, x) => s + x.points, 0)));
-
-  const band = (n: number): SevKey => (n >= 75 ? "critical" : n >= 55 ? "high" : n >= 30 ? "medium" : n >= 10 ? "low" : "info");
-  const rank: Record<SevKey, number> = { none: 0, info: 1, low: 2, medium: 3, high: 4, critical: 5 };
-  const banded = band(severityScore);
-  /* declared severity acts as a floor, multi-factor analysis can escalate it */
-  const sev: SevKey = rank[banded] >= rank[declaredSeverity] ? banded : declaredSeverity;
-
-  const severitySource: SeveritySource =
-    declaredSeverity === "none"
-      ? "Derived (multi-factor SBOM analysis)"
-      : sev === declaredSeverity
-        ? "Declared (SBOM) + multi-factor confirmed"
-        : "Escalated (multi-factor SBOM analysis)";
-
-  let riskScore = Math.max(severityScore, Math.round(f.cvss * 10));
-  riskScore = Math.max(0, Math.min(100, riskScore));
-
+  const eolDays = daysToEol(intel.eolDate);
+  const risk = nistRisk({
+    resolved: nist,
+    kev,
+    exploit,
+    pastEol: (eolDays !== null && eolDays < 0) || f.eol,
+    unsupported: lifecycle.supportStatus === "Unsupported" || lifecycle.supportStatus === "Legacy Platform",
+    exposed: EXPOSED_RE.test(f.blob),
+  });
+  const riskScore = risk.score;
 
   const patchPriority: VulnRecord["patchPriority"] =
     kev || exploit || sev === "critical" ? "P0" : sev === "high" ? "P1" : sev === "medium" ? "P2" : "P3";
@@ -230,7 +174,7 @@ export function toVulnRecord(id: string, raw: Row, feedIntel: Enrichment = {}): 
         ? "Plan a migration to a supported alternative; the component will never receive fixes."
         : "Track the vendor advisory; re-evaluate at the next scan.";
 
-  const exploitStatus = kev ? "KEV — actively exploited" : exploit ? "Public exploit" : f.cvss >= 9 ? "High likelihood" : "No known exploit";
+  const exploitStatus = kev ? "KEV — actively exploited" : exploit ? "Public exploit" : nist.score >= 9 ? "High likelihood" : "No known exploit";
 
 
   return {
@@ -241,12 +185,12 @@ export function toVulnRecord(id: string, raw: Row, feedIntel: Enrichment = {}): 
     vendor: f.vendor,
     application: f.application,
     cve: f.cve,
-    cvss: f.cvss,
+    cvss: nist.score,
+    cvssVector: nist.vector,
     severity: sev,
-    severitySource,
+    severitySource: nist.source,
     declaredSeverity,
-    severityScore,
-    severityFactors: factors.sort((a, b) => b.points - a.points),
+    riskFactors: risk.factors,
     license: f.license,
     fix: f.fix,
     status: f.status,
@@ -405,7 +349,7 @@ export function buildVulnIntel(
     .filter((r): r is { id: string; data: Row } => !!r)
     .map((r, i) => {
       const data = (r.data ?? {}) as Row;
-      return toVulnRecord(r.id ?? `row-${i}`, data, intelMap[intelKey(data)] ?? intelMap[lifeKey(data)] ?? {});
+      return toVulnRecord(r.id ?? `row-${i}`, data, { ...intelMap[lifeKey(data)], ...intelMap[intelKey(data)] });
     });
   const counts = emptyCounts();
   for (const r of records) counts[r.severity]++;
@@ -601,11 +545,11 @@ export function buildVulnIntel(
     sbomHealthScore,
     vendorTrust,
     critical: records.filter((r) => r.severity === "critical").sort((a, b) => b.cvss - a.cvss),
-    /* Fall back to the multi-factor risk ranking so SBOMs without CVSS columns
+    /* Fall back to the NIST risk ranking so SBOMs without CVSS columns
        still populate this view instead of rendering an empty table. */
     highestCves: (sortedByCvss.some((r) => r.cvss > 0)
       ? sortedByCvss.filter((r) => r.cvss > 0)
-      : [...records].sort((a, b) => b.severityScore - a.severityScore || b.riskScore - a.riskScore)
+      : [...records].sort((a, b) => b.riskScore - a.riskScore)
     ).slice(0, 200),
   };
 }

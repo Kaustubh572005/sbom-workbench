@@ -13,9 +13,10 @@ import { daysToEol } from "@/lib/lifecycle-dates";
 const NOT_PUBLISHED = "Not published";
 
 export const ANALYSIS_COLUMNS = [
-  "Estimated Severity",
-  "Estimated Confidence",
-  "Classification Reason",
+  "Severity (NIST)",
+  "Severity Basis",
+  "Score Confidence",
+  "Risk Factors",
   "Risk Score",
   "Risk Category",
   "Business Impact",
@@ -41,9 +42,10 @@ export const ANALYSIS_COLUMNS = [
 
 export function analysisFields(p: ComponentProfile): Record<string, string | number> {
   return {
-    "Estimated Severity": p.estimated ? `${p.severity} (estimated)` : p.severity,
-    "Estimated Confidence": `${p.estimatedConfidence}%`,
-    "Classification Reason": p.classificationReason,
+    "Severity (NIST)": p.severity,
+    "Severity Basis": p.severitySource,
+    "Score Confidence": `${p.scoreConfidence}%`,
+    "Risk Factors": p.riskFactors.map((f) => `${f.label} +${f.points}`).join(", ") || "—",
     "Risk Score": p.riskScore,
     "Risk Category": p.riskCategory,
     "Business Impact": p.businessImpact,
@@ -206,10 +208,3 @@ export function analysisSheets(a: PlatformAnalysis): Sheet[] {
   ].filter((s) => s.rows.length > 0);
 }
 
-export async function exportFullAnalysis(
-  datasetName: string,
-  originalColumns: string[],
-  analysis: PlatformAnalysis,
-) {
-  await exportXlsx([inventorySheet(datasetName, originalColumns, analysis.profiles), ...analysisSheets(analysis)], `${datasetName}-analysis`);
-}

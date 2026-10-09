@@ -467,9 +467,6 @@ function fromLines(text: string, filename: string): Record<string, unknown>[] {
 }
 
 /* --------------------------------- Detection -------------------------------- */
-export const isStructuredTextFile = (name: string) =>
-  /\.(json|cdx|spdx|spdx\.json|xml|yaml|yml|txt|lock|mod|tag|rdf|toml|list|md)$/i.test(name.trim());
-
 function clean(rows: Record<string, unknown>[], format: string, notes: string[]): ParsedSbom {
   const columns: string[] = [];
   for (const r of rows) for (const k of Object.keys(r)) if (!columns.includes(k)) columns.push(k);
