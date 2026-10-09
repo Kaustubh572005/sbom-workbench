@@ -9,24 +9,24 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
-import { Route as ApiChatRouteImport } from './routes/api/chat'
-import { Route as AuthenticatedVulnerabilitiesRouteImport } from './routes/_authenticated/vulnerabilities'
-import { Route as AuthenticatedSbomRouteImport } from './routes/_authenticated/sbom'
-import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
-import { Route as AuthenticatedLifecycleRouteImport } from './routes/_authenticated/lifecycle'
-import { Route as AuthenticatedLicensesRouteImport } from './routes/_authenticated/licenses'
 import { Route as AuthenticatedDatasetsRouteImport } from './routes/_authenticated/datasets'
+import { Route as AuthenticatedLicensesRouteImport } from './routes/_authenticated/licenses'
+import { Route as AuthenticatedLifecycleRouteImport } from './routes/_authenticated/lifecycle'
+import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
+import { Route as AuthenticatedSbomRouteImport } from './routes/_authenticated/sbom'
+import { Route as AuthenticatedVulnerabilitiesRouteImport } from './routes/_authenticated/vulnerabilities'
+import { Route as ApiChatRouteImport } from './routes/api/chat'
 
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
-  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
@@ -34,30 +34,9 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ApiChatRoute = ApiChatRouteImport.update({
-  id: '/api/chat',
-  path: '/api/chat',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedVulnerabilitiesRoute =
-  AuthenticatedVulnerabilitiesRouteImport.update({
-    id: '/vulnerabilities',
-    path: '/vulnerabilities',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedSbomRoute = AuthenticatedSbomRouteImport.update({
-  id: '/sbom',
-  path: '/sbom',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
-  id: '/reports',
-  path: '/reports',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedLifecycleRoute = AuthenticatedLifecycleRouteImport.update({
-  id: '/lifecycle',
-  path: '/lifecycle',
+const AuthenticatedDatasetsRoute = AuthenticatedDatasetsRouteImport.update({
+  id: '/datasets',
+  path: '/datasets',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedLicensesRoute = AuthenticatedLicensesRouteImport.update({
@@ -65,10 +44,31 @@ const AuthenticatedLicensesRoute = AuthenticatedLicensesRouteImport.update({
   path: '/licenses',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedDatasetsRoute = AuthenticatedDatasetsRouteImport.update({
-  id: '/datasets',
-  path: '/datasets',
+const AuthenticatedLifecycleRoute = AuthenticatedLifecycleRouteImport.update({
+  id: '/lifecycle',
+  path: '/lifecycle',
   getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedSbomRoute = AuthenticatedSbomRouteImport.update({
+  id: '/sbom',
+  path: '/sbom',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedVulnerabilitiesRoute =
+  AuthenticatedVulnerabilitiesRouteImport.update({
+    id: '/vulnerabilities',
+    path: '/vulnerabilities',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const ApiChatRoute = ApiChatRouteImport.update({
+  id: '/api/chat',
+  path: '/api/chat',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -151,18 +151,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_authenticated': {
       id: '/_authenticated'
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/': {
@@ -172,39 +172,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/api/chat': {
-      id: '/api/chat'
-      path: '/api/chat'
-      fullPath: '/api/chat'
-      preLoaderRoute: typeof ApiChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated/vulnerabilities': {
-      id: '/_authenticated/vulnerabilities'
-      path: '/vulnerabilities'
-      fullPath: '/vulnerabilities'
-      preLoaderRoute: typeof AuthenticatedVulnerabilitiesRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/sbom': {
-      id: '/_authenticated/sbom'
-      path: '/sbom'
-      fullPath: '/sbom'
-      preLoaderRoute: typeof AuthenticatedSbomRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/reports': {
-      id: '/_authenticated/reports'
-      path: '/reports'
-      fullPath: '/reports'
-      preLoaderRoute: typeof AuthenticatedReportsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/lifecycle': {
-      id: '/_authenticated/lifecycle'
-      path: '/lifecycle'
-      fullPath: '/lifecycle'
-      preLoaderRoute: typeof AuthenticatedLifecycleRouteImport
+    '/_authenticated/datasets': {
+      id: '/_authenticated/datasets'
+      path: '/datasets'
+      fullPath: '/datasets'
+      preLoaderRoute: typeof AuthenticatedDatasetsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/licenses': {
@@ -214,12 +186,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedLicensesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/datasets': {
-      id: '/_authenticated/datasets'
-      path: '/datasets'
-      fullPath: '/datasets'
-      preLoaderRoute: typeof AuthenticatedDatasetsRouteImport
+    '/_authenticated/lifecycle': {
+      id: '/_authenticated/lifecycle'
+      path: '/lifecycle'
+      fullPath: '/lifecycle'
+      preLoaderRoute: typeof AuthenticatedLifecycleRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/reports': {
+      id: '/_authenticated/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AuthenticatedReportsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/sbom': {
+      id: '/_authenticated/sbom'
+      path: '/sbom'
+      fullPath: '/sbom'
+      preLoaderRoute: typeof AuthenticatedSbomRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/vulnerabilities': {
+      id: '/_authenticated/vulnerabilities'
+      path: '/vulnerabilities'
+      fullPath: '/vulnerabilities'
+      preLoaderRoute: typeof AuthenticatedVulnerabilitiesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/chat': {
+      id: '/api/chat'
+      path: '/api/chat'
+      fullPath: '/api/chat'
+      preLoaderRoute: typeof ApiChatRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
