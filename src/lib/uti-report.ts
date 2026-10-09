@@ -89,7 +89,7 @@ function utiRecordRaw(p: ComponentProfile): UtiField[] {
     { field: "License Type", description: "License under which the component is distributed", value: `${dash(p.license)} · ${p.licenseType}` },
     { field: "Usage Restriction", description: "Limitations or restrictions on the use of the component", value: p.licenseType === "Strong Copyleft" ? "Source disclosure obligations on distribution" : p.licenseType === "Proprietary" ? "Commercial license terms apply" : p.licenseType === "Unknown" ? "Not declared — legal review required" : "No material restriction identified" },
     { field: "Release Date", description: "Date when this version was released", value: dash(rec.published) },
-    { field: "End of Life Date/End of Support", description: "Date after which the component is no longer supported", value: dash([p.eolDate && `EOL ${p.eolDate}`, p.eosDate && `EOS ${p.eosDate}`].filter(Boolean).join(" · ") || p.lifecycleStatus) },
+    { field: "End of Life Date/End of Support", description: "Date after which the component is no longer supported", value: `EOL ${p.eolDate || "Not published"} · EOS ${p.eosDate || "Not published"}` },
     { field: "Update Frequency", description: "How often the component is updated by the vendor", value: p.latestVersion && p.latestVersion !== p.version ? "Actively maintained — newer release available" : p.supportStatus === "Unsupported" ? "No longer updated by vendor" : "Vendor cadence not published" },
     { field: "Executable Property", description: "Whether the component contains directly executable code", value: executable },
     { field: "Executable Property Description", description: "Describes the executable property of the component", value: executable === "Yes" ? "Component ships compiled libraries, executables or runtime code that execute in the application process." : "No executable payload identified in the SBOM evidence — vendor confirmation required." },
@@ -166,7 +166,7 @@ export function buildUtiReport(dataset: string, a: PlatformAnalysis, raw?: RawLa
     {
       title: "4. Lifecycle Analysis",
       columns: ["Component", "Version", "Lifecycle status", "Support status", "EOL", "EOS", "Recommended action", "Confidence"],
-      rows: p.map((x) => [dash(x.name), dash(x.version), dash(x.lifecycleStatus), dash(x.supportStatus), dash(x.eolDate), dash(x.eosDate), dash(x.recommendedAction), dash(x.confidence)]),
+      rows: p.map((x) => [dash(x.name), dash(x.version), dash(x.lifecycleStatus), dash(x.supportStatus), x.eolDate || "Not published", x.eosDate || "Not published", dash(x.recommendedAction), dash(x.confidence)]),
     },
     {
       title: "5. License Analysis",
