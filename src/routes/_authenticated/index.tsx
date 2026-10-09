@@ -1,13 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { motion } from "framer-motion";
-import {
-  AreaChart, Area, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
-} from "recharts";
-import {
-  ShieldCheck, ShieldAlert, TrendingUp, TrendingDown, Boxes, Upload, FileBarChart,
-  Sparkles, ArrowRight, Clock, Bell, Activity, Scale, Gauge, Package, Database,
-} from "lucide-react";
+import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip } from "recharts";
+import { ShieldAlert, TrendingUp, TrendingDown, Boxes, Upload, FileBarChart, Sparkles, ArrowRight, Clock, Bell, Activity, Scale, Package, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkbench, NoDataset, severityConfig, useAnimatedCount, askAnalyst } from "@/lib/workbench-shared";
 

@@ -8,44 +8,26 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import ReactMarkdown from "react-markdown";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip,
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
-  BarChart, Bar,
-} from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 import { extractFromFile, expandArchives, ACCEPTED_UPLOAD_TYPES } from "@/lib/universal-import";
 import { useServerFn } from "@tanstack/react-start";
 import { enrichThreatIntel } from "@/lib/threat-intel.functions";
-import { enrichRows } from "@/lib/lifecycle-enrich";
+import { enrichRows, mergeIntel } from "@/lib/lifecycle-enrich";
+import { lookupNvd } from "@/lib/nist-nvd.functions";
 import type { Enrichment } from "@/lib/vuln-intel";
 import { identifyApplication, uniqueDatasetName, withApplication, type AppHint } from "@/lib/app-identity";
 import { exportCombinedFindings, type CombinedSource } from "@/lib/combined-export";
 import { buildUtiReport, type UtiReport } from "@/lib/uti-report";
 import { buildReport, type AnalysisReport } from "@/lib/risk-intel";
 import { AnalysisReportCard } from "@/components/AnalysisReport";
-import {
-  buildPlatformAnalysis, kpiPredicate,
-  type ComponentProfile, type KpiId, type PlatformAnalysis,
-} from "@/lib/platform-intel";
+import { buildPlatformAnalysis, kpiPredicate, type ComponentProfile, type KpiId, type PlatformAnalysis } from "@/lib/platform-intel";
 import { lifecycleDisplayText } from "@/lib/lifecycle-display";
-import {
-  exportCsv, exportJson, exportXlsx, inventorySheet, analysisSheets,
-  type Sheet,
-} from "@/lib/export-analysis";
+import { exportCsv, exportJson, exportXlsx, inventorySheet, analysisSheets, type Sheet } from "@/lib/export-analysis";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import {
-  Upload, Database, Trash2, Plus, Send, Sparkles, ShieldAlert, ShieldCheck,
-  FileSpreadsheet, Loader2, Search, AlertTriangle, AlertCircle, CheckCircle2,
-  Info, X, Package, TrendingUp, TrendingDown, Activity, Bug, Download,
-  Building2, Tag, Calendar, FileText, Copy, Edit3, ChevronRight, ChevronLeft, Layers,
-  GitBranch, Hash, Shield, FileBarChart, Landmark, ExternalLink, ListChecks, Boxes,
-  LayoutDashboard, LogOut, ArrowRight, CalendarClock,
-  Scale, Network, GitCompare,
-} from "lucide-react";
+import { Upload, Database, Trash2, Send, Sparkles, ShieldAlert, ShieldCheck, FileSpreadsheet, Loader2, Search, AlertTriangle, AlertCircle, CheckCircle2, Info, X, Package, Activity, Bug, Download, Building2, Tag, Calendar, FileText, Copy, Edit3, ChevronRight, ChevronLeft, Layers, GitBranch, Hash, Shield, FileBarChart, ExternalLink, ListChecks, Boxes, LayoutDashboard, LogOut, ArrowRight, CalendarClock, Scale } from "lucide-react";
 
 /* ============================== Types & helpers ============================== */
 export type Dataset = {
@@ -83,32 +65,6 @@ async function hashString(s: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const SEVERITY_KEYS = ["severity", "risk", "level", "criticality", "priority", "impact", "cvss", "score"];
-export function detectSeverityColumn(columns: string[]): string | null {
-  const lower = columns.map((c) => c.toLowerCase());
-  for (const key of SEVERITY_KEYS) {
-    const idx = lower.findIndex((c) => c.includes(key));
-    if (idx >= 0) return columns[idx];
-  }
-  return null;
-}
-
-export function getSeverityLevel(value: unknown): SeverityKey {
-  const s = String(value ?? "").toLowerCase().trim();
-  if (s.includes("critical") || s.includes("severe")) return "critical";
-  if (s.includes("high") || s.includes("major")) return "high";
-  if (s.includes("medium") || s.includes("moderate")) return "medium";
-  if (s.includes("low") || s.includes("minor")) return "low";
-  if (s.includes("info") || s.includes("note")) return "info";
-  const n = Number(s);
-  if (!isNaN(n)) {
-    if (n >= 9) return "critical";
-    if (n >= 7) return "high";
-    if (n >= 4) return "medium";
-    if (n > 0) return "low";
-  }
-  return "none";
-}
 
 export const severityConfig: Record<SeverityKey, {
   color: string; bg: string; border: string; dot: string; ring: string;
@@ -162,13 +118,6 @@ export function useAnimatedCount(target: number, durationMs = 800) {
   return val;
 }
 
-export function highlightMatch(text: string, query: string): ReactNode {
-  if (!query.trim()) return text;
-  const q = query.trim();
-  const idx = text.toLowerCase().indexOf(q.toLowerCase());
-  if (idx < 0) return text;
-  return (<>{text.slice(0, idx)}<mark className="search-hl">{text.slice(idx, idx + q.length)}</mark>{text.slice(idx + q.length)}</>);
-}
 
 const FIELD_ICONS: Array<[RegExp, typeof Package]> = [
   [/component|package|library|module/i, Package],
@@ -217,7 +166,6 @@ type WorkbenchCtx = {
   setDrawerId: (id: string | null) => void;
   datasetRiskMap: Record<string, { count: number; risk: number }>;
   lastScan: Date;
-  severityCol: string | null;
   severityCounts: Record<SeverityKey, number>;
   riskScore: number;
   riskBand: { label: string; color: string; desc: string; tone: SeverityKey };
@@ -302,6 +250,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const [enriching, setEnriching] = useState(false);
   const [combining, setCombining] = useState(false);
   const enrichFn = useServerFn(enrichThreatIntel);
+  const nvdFn = useServerFn(lookupNvd);
   const [intelNonce, setIntelNonce] = useState(0);
 
   useEffect(() => {
@@ -321,7 +270,6 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
 
   const active = datasets.find((d) => d.id === activeId) ?? null;
-  const severityCol = active ? detectSeverityColumn(active.columns) : null;
 
   /* ---- V2: automatic platform-wide analysis of every uploaded dataset ---- */
   const analysis = useMemo(
@@ -343,6 +291,10 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   }), [analysis]);
 
   const riskScore = analysis.overallRisk;
+  const liveRiskMap = useMemo(
+    () => (active ? { ...datasetRiskMap, [active.id]: { count: components.length, risk: analysis.overallRisk } } : datasetRiskMap),
+    [datasetRiskMap, active, components.length, analysis.overallRisk],
+  );
 
   /* automatic SBOM-EwayDMS report — rebuilt whenever the inventory changes */
   const utiReport = useMemo(() => {
@@ -392,15 +344,9 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     await Promise.all(list.map(async (d) => {
       const all = await fetchAllPages<{ data: Record<string, unknown> }>((from, to) =>
         supabase.from("components").select("data").eq("dataset_id", d.id).order("id").range(from, to)).catch(() => []);
-      const sev = detectSeverityColumn(d.columns);
-      const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-      if (sev) for (const r of all) {
-        const k = getSeverityLevel(r.data[sev]);
-        if (k in counts) counts[k as keyof typeof counts]++;
-      }
-      const total = all.length || 1;
-      const w = counts.critical * 10 + counts.high * 7 + counts.medium * 4 + counts.low;
-      map[d.id] = { count: all.length, risk: Math.min(100, Math.round((w / (total * 10)) * 100)) };
+      /* same NIST scorer as every other screen — the active dataset is overlaid with live NVD data below */
+      const risk = buildPlatformAnalysis(all.map((r, i) => ({ id: `${d.id}:${i}`, data: withApplication(r.data, d.name) }))).overallRisk;
+      map[d.id] = { count: all.length, risk };
     }));
     setDatasetRiskMap(map);
   }, []);
@@ -456,7 +402,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
           supabase.from("components").select("id,data").eq("dataset_id", d.id).order("created_at").order("id").range(from, to));
         const items = rows.map((r) => ({ id: r.id, data: withApplication(r.data, d.name) }));
         toast.loading(`Looking up EOL / EOS dates for ${d.name}…`, { id: tid });
-        await enrichRows(items.map((i) => i.data), live, enrichFn, (patch) => { live = { ...live, ...patch }; });
+        await enrichRows(items.map((i) => i.data), live, { enrich: enrichFn, nvd: nvdFn }, (patch) => { live = mergeIntel(live, patch); });
         sources.push({
           application: d.name,
           sourceFile: d.source_filename ?? d.name,
@@ -465,7 +411,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
           nameConfidence: uploadHistory.find((u) => u.datasetId === d.id)?.appConfidence,
         });
       }
-      setIntelMap((prev) => ({ ...prev, ...live }));
+      setIntelMap((prev) => mergeIntel(prev, live));
       await exportCombinedFindings(sources, fmt);
       toast.success(`Combined findings for ${sources.length} file(s) downloaded`);
     } catch (e) {
@@ -474,7 +420,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       toast.dismiss(tid);
       setCombining(false);
     }
-  }, [datasets, intelMap, enrichFn, uploadHistory]);
+  }, [datasets, intelMap, enrichFn, nvdFn, uploadHistory]);
 
   const handleFile = useCallback(async (
     file: File,
@@ -610,8 +556,8 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     void enrichRows(
       components.slice(0, 20000).map((c) => c.data),
       intelMap,
-      enrichFn,
-      (patch, at) => { setIntelMap((prev) => ({ ...prev, ...patch })); setIntelAt(at); },
+      { enrich: enrichFn, nvd: nvdFn },
+      (patch, at) => { setIntelMap((prev) => mergeIntel(prev, patch)); setIntelAt(at); },
       () => cancelled,
     ).finally(() => { if (!cancelled) setEnriching(false); });
     return () => { cancelled = true; setEnriching(false); };
@@ -679,14 +625,13 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         const row: Record<string, unknown> = {};
         for (const col of mainCols) row[col] = c.data[col] ?? "";
         const r = main.addRow(row);
-        if (severityCol) {
-          const sev = getSeverityLevel(c.data[severityCol]);
-          const tint: Record<string, string> = {
-            critical: "FFFEE2E2", high: "FFFFEDD5", medium: "FFFEF9C3", low: "FFDCFCE7", info: "FFDBEAFE", none: "",
-          };
-          if (tint[sev]) r.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: tint[sev] } }; });
-        }
-        if (idx % 2 === 1 && severityCol == null) {
+        /* row colour = NIST severity from the shared analysis, never the raw uploaded column */
+        const sev = profileById[c.id]?.severity ?? "none";
+        const tint: Record<string, string> = {
+          critical: "FFFEE2E2", high: "FFFFEDD5", medium: "FFFEF9C3", low: "FFDCFCE7", info: "FFDBEAFE", none: "",
+        };
+        if (tint[sev]) r.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: tint[sev] } }; });
+        if (idx % 2 === 1 && sev === "none") {
           r.eachCell((cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } }; });
         }
       });
@@ -728,7 +673,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export failed");
     }
-  }, [active, components, severityCol]);
+  }, [active, components, profileById]);
 
   const exportAnalysis = useCallback(async (fmt: "xlsx" | "csv" | "json") => {
     if (!active) { toast.error("No dataset selected"); return; }
@@ -759,7 +704,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const value: WorkbenchCtx = {
     datasets, active, activeId, setActiveId, components, loading, uploading,
     searchQuery, setSearchQuery, severityFilter, setSeverityFilter, drawerId, setDrawerId,
-    datasetRiskMap, lastScan, severityCol, severityCounts, riskScore, riskBand, filteredComponents,
+    datasetRiskMap: liveRiskMap, lastScan, severityCounts, riskScore, riskBand, filteredComponents,
     fileInputRef, searchRef, handleFile, updateCell, addRow, deleteRow, deleteDataset, downloadExcel, refresh,
     aiMinimized, setAiMinimized,
     analysis, profileById, kpiFilter, setKpiFilter, handleFiles, uploadProgress, uploadHistory, utiReport,
@@ -914,52 +859,6 @@ export function Header({ userEmail, onSignOut }: { userEmail?: string; onSignOut
   );
 }
 
-/* ============================== UI: KPI tiles (clickable filter) ============================== */
-export function KpiRow() {
-  const { components, severityCounts, severityFilter, setSeverityFilter } = useWorkbench();
-  const navigate = useNavigate();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-
-  const tiles: Array<{ key: SeverityKey | "all"; label: string; value: number; tone: SeverityKey; icon: typeof Package; glow?: boolean }> = [
-    { key: "all", label: "Components", value: components.length, tone: "info", icon: Package },
-    { key: "critical", label: "Critical", value: severityCounts.critical, tone: "critical", icon: AlertTriangle, glow: severityCounts.critical > 0 },
-    { key: "high", label: "High", value: severityCounts.high, tone: "high", icon: AlertTriangle },
-    { key: "medium", label: "Medium", value: severityCounts.medium, tone: "medium", icon: AlertCircle },
-    { key: "low", label: "Low / Info", value: severityCounts.low + severityCounts.info, tone: "low", icon: CheckCircle2 },
-  ];
-
-  const onTile = (key: SeverityKey | "all") => {
-    setSeverityFilter(key);
-    if (key !== "all" && pathname === "/") navigate({ to: "/vulnerabilities" });
-  };
-
-  return (
-    <section className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-      {tiles.map((t) => {
-        const cfg = severityConfig[t.tone];
-        const animated = useAnimatedCount(t.value);
-        const isActive = severityFilter === t.key;
-        return (
-          <motion.button key={t.key} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-            whileHover={{ y: -3 }} whileTap={{ scale: 0.98 }} onClick={() => onTile(t.key)}
-            className={`card-elevated card-hover relative overflow-hidden border p-4 text-left transition ${cfg.border} ${t.glow && t.value > 0 ? "glow-critical" : ""} ${isActive ? `ring-2 ${cfg.ring} ring-offset-2 ring-offset-background` : ""}`}>
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{t.label}</span>
-              <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${cfg.bg} ${cfg.color}`}>
-                <t.icon className="h-3.5 w-3.5" />
-              </div>
-            </div>
-            <div className={`mt-2 text-3xl font-bold tracking-tight ${cfg.color}`}>{animated.toLocaleString()}</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {t.key === "all" ? "Click to reset filters" : isActive ? "Filter active — click to clear" : "Click to filter"}
-            </div>
-          </motion.button>
-        );
-      })}
-    </section>
-  );
-}
-
 export function ActiveFilterChip() {
   const { severityFilter, setSeverityFilter, filteredComponents, components } = useWorkbench();
   if (severityFilter === "all") return null;
@@ -974,186 +873,6 @@ export function ActiveFilterChip() {
         Reset
       </button>
     </div>
-  );
-}
-
-/* ============================== UI: Enterprise Risk Card ============================== */
-export function EnterpriseRiskCard() {
-  const { riskScore, riskBand, severityCounts, lastScan, components } = useWorkbench();
-  const animated = useAnimatedCount(riskScore);
-  const cfg = severityConfig[riskBand.tone];
-  // synthetic trend delta - in real app, store snapshots
-  const delta = Math.round(((riskScore % 7) - 3));
-  const trendUp = delta > 0;
-  const topVulns = useMemo(() => {
-    return components
-      .map((c) => ({ name: getField(c.data, ["component", "package", "name"]) || "Unknown", cvss: parseFloat(getField(c.data, ["cvss", "score"])) || 0, cve: getField(c.data, ["cve", "advisory"]) }))
-      .filter((x) => x.cvss > 0)
-      .sort((a, b) => b.cvss - a.cvss)
-      .slice(0, 1);
-  }, [components]);
-
-  return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.1 }}
-      className="card-elevated border border-border/60 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Overall Security Score</span>
-          <div className="mt-2 flex items-baseline gap-3">
-            <span className={`text-5xl font-bold tracking-tight ${cfg.color}`}>{animated}</span>
-            <span className="text-sm text-muted-foreground">/ 100</span>
-            <span className={`chip border ${cfg.bg} ${cfg.border} ${cfg.color}`}>
-              <Shield className="h-3 w-3" /> {riskBand.label}
-            </span>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className={`flex items-center gap-1 text-xs font-semibold ${trendUp ? "text-severity-critical" : "text-severity-low"}`}>
-            {trendUp ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-            {trendUp ? "+" : ""}{delta} pts
-          </div>
-          <div className="text-[10px] text-muted-foreground">vs last scan</div>
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-muted/30">
-          <motion.div
-            initial={{ width: 0 }} animate={{ width: `${riskScore}%` }} transition={{ duration: 0.9, ease: "easeOut" }}
-            className="h-full rounded-full"
-            style={{ background: "linear-gradient(90deg, var(--color-severity-low) 0%, var(--color-severity-medium) 50%, var(--color-severity-critical) 100%)" }}
-          />
-        </div>
-        <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
-          <span>Healthy</span><span>Moderate</span><span>Elevated</span><span>Critical</span>
-        </div>
-      </div>
-
-      <div className="mt-5 grid grid-cols-4 gap-2">
-        {(["critical", "high", "medium", "low"] as SeverityKey[]).map((k) => {
-          const c = severityConfig[k];
-          return (
-            <div key={k} className={`rounded-lg border ${c.border} ${c.bg} px-2 py-2 text-center`}>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.label}</div>
-              <div className={`mt-0.5 text-lg font-bold ${c.color}`}>{severityCounts[k]}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="mt-4 flex items-start gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
-        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-        <div className="min-w-0 text-xs">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-primary">AI Recommendation</div>
-          <p className="mt-0.5 text-foreground/90 leading-snug">
-            {topVulns.length > 0
-              ? <>Patch <span className="font-semibold">{topVulns[0].name}</span> first {topVulns[0].cve ? <>({topVulns[0].cve}, CVSS {topVulns[0].cvss})</> : null} — highest single-component risk in this dataset.</>
-              : severityCounts.critical > 0
-              ? "Triage Critical findings first; review fix availability and patch within 24-48h."
-              : "Posture is stable. Run a fresh scan to detect drift."}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground">
-        <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Last scan {lastScan.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</span>
-        <span>{components.length} components</span>
-      </div>
-    </motion.div>
-  );
-}
-
-/* ============================== UI: Severity bar + charts ============================== */
-export function AnimatedSeverityBar({ counts, total }: { counts: Record<SeverityKey, number>; total: number }) {
-  if (total === 0) return <div className="h-3 w-full rounded-full bg-muted/40" />;
-  const segs: SeverityKey[] = ["critical", "high", "medium", "low", "info", "none"];
-  return (
-    <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted/30">
-      {segs.map((k) => {
-        const pct = (counts[k] / total) * 100;
-        if (pct === 0) return null;
-        return (
-          <motion.div key={k} className={severityConfig[k].dot} initial={{ width: 0 }}
-            animate={{ width: `${pct}%` }} transition={{ duration: 0.7, ease: "easeOut" }}
-            title={`${k}: ${counts[k]}`} />
-        );
-      })}
-    </div>
-  );
-}
-
-export function ChartsRow() {
-  const { severityCounts, components } = useWorkbench();
-  const donut = useMemo(() => (["critical", "high", "medium", "low", "info"] as SeverityKey[])
-    .map((k) => ({ name: severityConfig[k].label, value: severityCounts[k], fill: severityConfig[k].hex }))
-    .filter((d) => d.value > 0), [severityCounts]);
-  const topVendors = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const c of components) {
-      const v = getField(c.data, ["supplier", "vendor", "publisher"]);
-      if (!v) continue;
-      m.set(v, (m.get(v) ?? 0) + 1);
-    }
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, value]) => ({ name, value }));
-  }, [components]);
-  const trend = useMemo(() => {
-    const base = severityCounts.critical + severityCounts.high * 0.6 + severityCounts.medium * 0.3;
-    return Array.from({ length: 14 }, (_, i) => ({
-      day: `D${i + 1}`,
-      risk: Math.max(0, Math.round(base * (0.6 + Math.sin(i * 0.5) * 0.25 + i * 0.02))),
-    }));
-  }, [severityCounts]);
-
-  if (components.length === 0) return null;
-  return (
-    <section className="grid gap-4 md:grid-cols-3">
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-elevated border border-border/60 p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Activity className="h-4 w-4 text-primary" /> Severity Distribution</h3>
-        <div className="h-44">
-          <ResponsiveContainer>
-            <PieChart>
-              <Pie data={donut} dataKey="value" nameKey="name" innerRadius={42} outerRadius={70} paddingAngle={3}>
-                {donut.map((d, i) => <Cell key={i} fill={d.fill} stroke="transparent" />)}
-              </Pie>
-              <RTooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 10, fontSize: 12 }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </motion.div>
-
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="card-elevated border border-border/60 p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold"><TrendingUp className="h-4 w-4 text-primary" /> Risk Trend (14d)</h3>
-        <div className="h-44">
-          <ResponsiveContainer>
-            <LineChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in oklab, var(--color-foreground) 8%, transparent)" />
-              <XAxis dataKey="day" stroke="var(--color-muted-foreground)" fontSize={10} />
-              <YAxis stroke="var(--color-muted-foreground)" fontSize={10} />
-              <RTooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 10, fontSize: 12 }} />
-              <Line type="monotone" dataKey="risk" stroke="var(--color-primary)" strokeWidth={2.5} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </motion.div>
-
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="card-elevated border border-border/60 p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Building2 className="h-4 w-4 text-primary" /> Top Vendors</h3>
-        <div className="h-44">
-          {topVendors.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No vendor data</div>
-          ) : (
-            <ResponsiveContainer>
-              <BarChart data={topVendors} layout="vertical" margin={{ left: 12 }}>
-                <XAxis type="number" stroke="var(--color-muted-foreground)" fontSize={10} />
-                <YAxis type="category" dataKey="name" width={90} stroke="var(--color-muted-foreground)" fontSize={10} />
-                <RTooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 10, fontSize: 12 }} />
-                <Bar dataKey="value" fill="var(--color-primary)" radius={[0, 6, 6, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </motion.div>
-    </section>
   );
 }
 
@@ -1176,131 +895,6 @@ export function SearchBar() {
         )}
       </div>
     </div>
-  );
-}
-
-/* ============================== UI: Advisory card ============================== */
-export function AdvisoryCard({ row, index }: { row: Component; index: number }) {
-  const { severityCol, searchQuery, setDrawerId, deleteRow } = useWorkbench();
-  const severity: SeverityKey = severityCol ? getSeverityLevel(row.data[severityCol]) : "none";
-  const cfg = severityConfig[severity];
-  const Icon = cfg.icon;
-  const title = getField(row.data, ["component", "package", "name"]) || getField(row.data, ["cve"]) || String(Object.values(row.data)[0] ?? "Component");
-  const app = getField(row.data, ["application", "app"]);
-  const vendor = getField(row.data, ["supplier", "vendor", "publisher"]);
-  const version = getField(row.data, ["version", "release"]);
-  const cve = getField(row.data, ["cve", "advisory"]);
-  const cvss = getField(row.data, ["cvss", "score"]);
-  const status = getField(row.data, ["status", "state"]);
-  const fix = getField(row.data, ["fix", "patch", "remediation"]);
-  const detected = getField(row.data, ["detected", "date", "discovered"]);
-
-  return (
-    <motion.article layout
-      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-      transition={{ duration: 0.25, delay: Math.min(index * 0.02, 0.2) }}
-      whileHover={{ y: -2 }}
-      className={`group card-elevated card-hover relative cursor-pointer border ${cfg.border} ${severity === "critical" ? "glow-critical" : ""} p-4`}
-      onClick={() => setDrawerId(row.id)}>
-      <div className="flex items-start gap-3">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${cfg.bg} ${cfg.color}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`chip border ${cfg.bg} ${cfg.border} ${cfg.color}`}>{cfg.label}</span>
-            {cve && <span className="chip border border-border bg-muted/40 text-foreground"><ShieldAlert className="h-3 w-3" />{highlightMatch(cve, searchQuery)}</span>}
-            {cvss && <span className="chip border border-border bg-muted/40 text-foreground"><Activity className="h-3 w-3" />CVSS {cvss}</span>}
-            {status && <span className="chip border border-border bg-muted/40 text-muted-foreground">{status}</span>}
-          </div>
-          <h3 className="mt-1.5 truncate text-base font-semibold tracking-tight text-foreground">{highlightMatch(title, searchQuery)}</h3>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-            {app && <span className="flex items-center gap-1.5"><Boxes className="h-3.5 w-3.5" />{highlightMatch(app, searchQuery)}</span>}
-            {vendor && <span className="flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5" />{highlightMatch(vendor, searchQuery)}</span>}
-            {version && <span className="flex items-center gap-1.5"><GitBranch className="h-3.5 w-3.5" />{highlightMatch(version, searchQuery)}</span>}
-            {fix && <span className="flex items-center gap-1.5 text-severity-low"><Shield className="h-3.5 w-3.5" />Fix: {fix}</span>}
-            {detected && <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" />{detected}</span>}
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); void deleteRow(row.id); }}
-            className="rounded-md p-1.5 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
-            aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
-          <ChevronRight className="h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground" />
-        </div>
-      </div>
-    </motion.article>
-  );
-}
-
-/* ============================== UI: Enterprise KPI grid ============================== */
-const KPI_TILES: Array<{ id: KpiId; label: string; tone: SeverityKey }> = [
-  { id: "all", label: "Components", tone: "info" },
-  { id: "critical", label: "Critical", tone: "critical" },
-  { id: "high", label: "High", tone: "high" },
-  { id: "medium", label: "Medium", tone: "medium" },
-  { id: "low", label: "Low", tone: "low" },
-  { id: "kev", label: "Known Exploited", tone: "critical" },
-  { id: "eol", label: "End of Life", tone: "critical" },
-  { id: "eos", label: "End of Support", tone: "high" },
-  { id: "unsupported", label: "Unsupported", tone: "high" },
-  { id: "deprecated", label: "Deprecated", tone: "medium" },
-  { id: "legacy", label: "Legacy", tone: "medium" },
-  { id: "upgrade", label: "Upgrade Required", tone: "high" },
-  { id: "appsAtRisk", label: "Apps at Risk", tone: "high" },
-  { id: "vendorsAtRisk", label: "Vendors at Risk", tone: "medium" },
-  { id: "licenseRisk", label: "License Risk", tone: "high" },
-  { id: "multiVersion", label: "Version Sprawl", tone: "medium" },
-  { id: "internetFacing", label: "Internet-facing", tone: "critical" },
-  { id: "missingMetadata", label: "Missing Metadata", tone: "info" },
-];
-
-function KpiTile({ id, label, tone, value, active, onClick }: {
-  id: KpiId; label: string; tone: SeverityKey; value: number; active: boolean; onClick: () => void;
-}) {
-  const cfg = severityConfig[tone];
-  const animated = useAnimatedCount(value);
-  return (
-    <motion.button key={id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -3 }} whileTap={{ scale: 0.98 }} onClick={onClick}
-      className={`card-elevated card-hover border p-3 text-left ${cfg.border} ${active ? `ring-2 ${cfg.ring} ring-offset-2 ring-offset-background` : ""}`}>
-      <div className="flex items-center justify-between gap-1">
-        <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${cfg.dot}`} />
-      </div>
-      <div className={`mt-1 text-2xl font-bold tracking-tight ${cfg.color}`}>{animated.toLocaleString()}</div>
-    </motion.button>
-  );
-}
-
-export function EnterpriseKpiGrid() {
-  const { analysis, kpiFilter, setKpiFilter, severityCounts } = useWorkbench();
-  const navigate = useNavigate();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-
-  return (
-    <section className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {KPI_TILES.map((t) => (
-          <KpiTile key={t.id} {...t}
-            value={analysis.counts[t.id] ?? 0}
-            active={kpiFilter === t.id}
-            onClick={() => {
-              const next = kpiFilter === t.id || t.id === "all" ? null : t.id;
-              setKpiFilter(next);
-              if (next && pathname === "/") void navigate({ to: "/vulnerabilities" });
-            }} />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
-        <span>SBOM Health Score: <strong className="text-foreground">{analysis.healthScore}/100</strong></span>
-        <span>Risk: <strong className="text-foreground">{analysis.overallRisk}/100 ({analysis.riskCategory})</strong></span>
-        <span>Applications: <strong className="text-foreground">{analysis.applications.length}</strong></span>
-        <span>Vendors: <strong className="text-foreground">{analysis.vendors.length}</strong></span>
-        <span>Analysis confidence: <strong className="text-foreground">{analysis.confidence}%</strong></span>
-        <span>Severity spread: {severityCounts.critical}C / {severityCounts.high}H / {severityCounts.medium}M / {severityCounts.low}L</span>
-      </div>
-    </section>
   );
 }
 
@@ -1387,7 +981,7 @@ function ProfileIntel({ profile: p }: { profile: ComponentProfile }) {
     <div className={`mb-4 rounded-xl border p-4 ${cfg.border} ${cfg.bg}`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className={`chip border bg-background/90 ${cfg.border} ${cfg.color} text-[10px]`}>
-          {cfg.label}{p.estimated ? " · estimated" : ""}
+          {cfg.label}{p.severitySource === "Declared severity" || p.severitySource === "Unscored" ? ` · ${p.severitySource.toLowerCase()}` : ""}
         </span>
         <span className="chip border border-border bg-background/90 text-[10px]">Risk {p.riskScore}/100 · {p.riskCategory}</span>
         {p.kev && <span className="chip border border-severity-critical/40 bg-background/90 text-[10px] text-severity-critical">Known exploited</span>}
@@ -1401,11 +995,13 @@ function ProfileIntel({ profile: p }: { profile: ComponentProfile }) {
           </div>
         ))}
       </div>
-      {p.classificationReason && (
-        <p className="mt-3 rounded-lg bg-background/70 p-2 text-[11px] text-muted-foreground">
-          {p.classificationReason}
-        </p>
-      )}
+      <p className="mt-3 rounded-lg bg-background/70 p-2 text-[11px] text-muted-foreground">
+        {p.severitySource === "Declared severity"
+          ? "No CVSS score available — the severity label from the uploaded file is shown until NIST NVD data is found."
+          : p.severitySource === "Unscored"
+            ? "No CVSS score or severity label — this component is not scored. Lifecycle and metadata findings still apply."
+            : `Severity follows the NIST NVD scale for the CVSS ${p.cvss} base score (source: ${p.severitySource}).`}
+      </p>
     </div>
   );
 }
@@ -1489,41 +1085,6 @@ export function DetailDrawer() {
 }
 
 /* ============================== UI: Empty / Skeleton / NoDataset ============================== */
-export function EmptyState({ searching }: { searching: boolean }) {
-  return (
-    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
-      className="card-elevated flex h-64 items-center justify-center border border-dashed border-border/60">
-      <div className="text-center">
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-severity-low/15 text-severity-low">
-          <ShieldCheck className="h-7 w-7" />
-        </div>
-        <p className="text-sm font-semibold">{searching ? "No matches found" : "Everything looks secure"}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {searching ? "Try a different search term or clear the severity filter." : "No components yet. Add a row or append another file."}
-        </p>
-      </div>
-    </motion.div>
-  );
-}
-
-export function SkeletonList() {
-  return (
-    <div className="space-y-3">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="card-elevated border border-border/60 p-4">
-          <div className="flex items-start gap-3">
-            <div className="skeleton h-10 w-10 rounded-xl" />
-            <div className="flex-1 space-y-2">
-              <div className="skeleton h-4 w-1/3" />
-              <div className="skeleton h-3 w-2/3" />
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function NoDataset() {
   const { fileInputRef } = useWorkbench();
   return (

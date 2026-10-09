@@ -1,12 +1,12 @@
 /**
  * Platform Intelligence layer (SBOM Workbench V2).
  *
- * Sits on top of the vulnerability + lifecycle + heuristic engines and produces
+ * Sits on top of the NIST-scored vulnerability + lifecycle engines and produces
  * everything the Dashboard, Component Inventory, Dependency, License and
  * Comparison views need. Pure functions, no IO — safe for 100k+ rows.
  */
 
-import { assessAll, type ComponentRisk } from "@/lib/sbom-heuristics";
+import type { RiskFactor, ScoreSource } from "@/lib/nist-scoring";
 import { buildVulnIntel, intelKey, type Enrichment, type VulnIntel, type VulnRecord } from "@/lib/vuln-intel";
 import type { SevKey } from "@/lib/risk-intel";
 import { lifecycleDisplayText } from "@/lib/lifecycle-display";
@@ -270,9 +270,11 @@ export type ComponentProfile = {
   cve: string;
   cvss: number;
   severity: SevKey;
-  estimated: boolean;
-  estimatedConfidence: number;
-  classificationReason: string;
+  /** where the CVSS score behind the NIST severity band came from */
+  severitySource: ScoreSource;
+  /** how much to trust the score: NVD 95 · uploaded CVSS / vector 90 · declared label 60 · unscored 30 */
+  scoreConfidence: number;
+  riskFactors: RiskFactor[];
   lifecycleStatus: string;
   supportStatus: string;
   remediationStatus: string;
@@ -294,7 +296,6 @@ export type ComponentProfile = {
   kev: boolean;
   exploit: boolean;
   record: VulnRecord;
-  risk: ComponentRisk;
 };
 
 const EXPOSED_RE = /internet|public|external|edge|dmz|web|api gateway|ingress/i;
@@ -316,44 +317,42 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
   intel: VulnIntel;
 } {
   const intel = buildVulnIntel(items, intelMap);
-  const risks = assessAll(items);
-  const riskById = new Map(risks.map((r) => [r.id, r]));
 
   const profiles: ComponentProfile[] = intel.records.map((rec) => {
-    const risk = riskById.get(rec.id)!;
     const row = rec.raw;
     const blob = rec.blob;
-    const lic = classifyLicense(rec.license || risk.license);
+    const lic = classifyLicense(rec.license);
     const exposure = exposureOf(row, blob);
-
-    let riskScore = Math.max(rec.riskScore, risk.score);
-    if (exposure === "Internet-facing") riskScore = Math.min(100, riskScore + 8);
-    if (rec.lifecycle.supportStatus === "Unsupported") riskScore = Math.min(100, riskScore + 6);
-    if (lic.risk === "critical") riskScore = Math.min(100, riskScore + 4);
-    if (risk.missing.length >= 3) riskScore = Math.min(100, riskScore + 3);
+    /* severity and risk come ONLY from the NIST scorer (via the vulnerability record) — no second opinion */
+    const riskScore = rec.riskScore;
+    const purl = pickField(row, ["purl", "packageurl"]);
+    const cpe = pickField(row, ["cpe"]);
+    const missing = [
+      !rec.component && "Name", !rec.version && "Version", !rec.vendor && "Supplier", !rec.license && "License", !purl && "PURL", !cpe && "CPE",
+    ].filter(Boolean) as string[];
 
     const dependsOn = splitList(pickField(row, ["dependencies", "dependson", "childdependencies", "requires", "children"]));
     const dependencyOf = splitList(pickField(row, ["parentdependencies", "parent", "dependencyof", "usedby", "parentcomponent"]));
 
     return {
       id: rec.id,
-      name: rec.component || risk.name,
+      name: rec.component,
       version: rec.version,
-      supplier: rec.vendor || risk.supplier,
+      supplier: rec.vendor,
       packageName: pickField(row, ["package", "packagename", "artifact", "module"]) || rec.component,
-      license: rec.license || risk.license,
+      license: rec.license,
       licenseType: lic.type,
       licenseRisk: lic.risk,
-      purl: risk.purl,
-      cpe: risk.cpe,
+      purl,
+      cpe,
       hash: pickField(row, ["hash", "sha256", "sha1", "md5", "checksum", "digest"]),
       application: rec.application,
       cve: rec.cve,
       cvss: rec.cvss,
-      severity: rec.severity === "none" ? risk.severity : rec.severity,
-      estimated: risk.estimated,
-      estimatedConfidence: risk.confidence,
-      classificationReason: risk.rationale,
+      severity: rec.severity,
+      severitySource: rec.severitySource,
+      scoreConfidence: { "NIST NVD": 95, "Uploaded CVSS": 90, "CVSS vector (computed)": 90, "Declared severity": 60, Unscored: 30 }[rec.severitySource],
+      riskFactors: rec.riskFactors,
       lifecycleStatus: rec.lifecycle.lifecycleStatus,
       supportStatus: rec.lifecycle.supportStatus,
       remediationStatus: rec.lifecycle.remediationStatus,
@@ -371,11 +370,10 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
       businessImpact: rec.businessImpact,
       dependsOn,
       dependencyOf,
-      missing: risk.missing,
+      missing,
       kev: rec.kev,
       exploit: rec.exploit,
       record: rec,
-      risk,
     };
   });
 
@@ -526,7 +524,7 @@ export function buildPlatformAnalysis(items: Item[], intelMap: Record<string, En
     ),
   );
 
-  const confidence = Math.round(profiles.reduce((a, p) => a + p.estimatedConfidence, 0) / total);
+  const confidence = Math.round(profiles.reduce((a, p) => a + p.scoreConfidence, 0) / total);
 
   const topRisk = [...profiles].sort((a, b) => b.riskScore - a.riskScore).slice(0, 10);
   const appRisk = intel.appsAtRisk.slice(0, 10);
@@ -735,54 +733,6 @@ export function buildPlatformAnalysis(items: Item[], intelMap: Record<string, En
 }
 
 /* ============================== SBOM comparison ============================== */
-export type CompareResult = {
-  added: ComponentProfile[];
-  removed: ComponentProfile[];
-  updated: Array<{ name: string; from: string; to: string; a: ComponentProfile; b: ComponentProfile }>;
-  unchanged: number;
-  newVulns: ComponentProfile[];
-  resolvedVulns: ComponentProfile[];
-  newEol: ComponentProfile[];
-  resolvedEol: ComponentProfile[];
-  licenseChanges: Array<{ name: string; from: string; to: string }>;
-  dependencyChanges: Array<{ name: string; from: number; to: number }>;
-  riskDelta: number;
-};
 
-export function compareAnalyses(a: PlatformAnalysis, b: PlatformAnalysis): CompareResult {
-  const key = (p: ComponentProfile) => p.name.toLowerCase();
-  const mapA = new Map(a.profiles.map((p) => [key(p), p]));
-  const mapB = new Map(b.profiles.map((p) => [key(p), p]));
-
-  const added = b.profiles.filter((p) => !mapA.has(key(p)));
-  const removed = a.profiles.filter((p) => !mapB.has(key(p)));
-  const updated: CompareResult["updated"] = [];
-  const licenseChanges: CompareResult["licenseChanges"] = [];
-  const dependencyChanges: CompareResult["dependencyChanges"] = [];
-  let unchanged = 0;
-
-  for (const [k, pa] of mapA) {
-    const pb = mapB.get(k);
-    if (!pb) continue;
-    if ((pa.version || "") !== (pb.version || "")) updated.push({ name: pb.name, from: pa.version || "—", to: pb.version || "—", a: pa, b: pb });
-    else unchanged++;
-    if ((pa.license || "") !== (pb.license || "")) licenseChanges.push({ name: pb.name, from: pa.license || "—", to: pb.license || "—" });
-    if (pa.dependsOn.length !== pb.dependsOn.length) dependencyChanges.push({ name: pb.name, from: pa.dependsOn.length, to: pb.dependsOn.length });
-  }
-
-  const risky = (p: ComponentProfile) => p.severity === "critical" || p.severity === "high";
-  const isEol = (p: ComponentProfile) => /End of|Obsolete/i.test(p.lifecycleStatus) || p.supportStatus === "Unsupported";
-
-  const newVulns = b.profiles.filter((p) => risky(p) && !(mapA.get(key(p)) && risky(mapA.get(key(p))!)));
-  const resolvedVulns = a.profiles.filter((p) => risky(p) && !(mapB.get(key(p)) && risky(mapB.get(key(p))!)));
-  const newEol = b.profiles.filter((p) => isEol(p) && !(mapA.get(key(p)) && isEol(mapA.get(key(p))!)));
-  const resolvedEol = a.profiles.filter((p) => isEol(p) && !(mapB.get(key(p)) && isEol(mapB.get(key(p))!)));
-
-  return {
-    added, removed, updated, unchanged, newVulns, resolvedVulns, newEol, resolvedEol,
-    licenseChanges, dependencyChanges,
-    riskDelta: b.overallRisk - a.overallRisk,
-  };
-}
 
 export { intelKey };

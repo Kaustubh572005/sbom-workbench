@@ -191,4 +191,3 @@ export function normalizeJsonSbom(text: string): NormalizedImport {
   return { rows: cleaned, columns: useful, format };
 }
 
-export const isJsonFile = (name: string) => /\.(json|cdx|spdx)$/i.test(name.trim());

@@ -167,12 +167,6 @@ export function daysToEol(eol?: string, now = new Date()): number | null {
   return d ? daysBetween(now, d) : null;
 }
 
-export function lifecycleStage(days: number | null): "Past EOL" | "Security Only" | "Active" | "Unknown" {
-  if (days === null) return "Unknown";
-  if (days < 0) return "Past EOL";
-  if (days <= 90) return "Security Only";
-  return "Active";
-}
 
 /* --------------------------------- lookup --------------------------------- */
 export function lookupLifecycle(name: string, version: string): Cycle | undefined {
@@ -183,8 +177,6 @@ export function lookupLifecycle(name: string, version: string): Cycle | undefine
   const hit = v ? keys.find((k) => v === k || v.startsWith(k + ".") || v.startsWith(k + "-")) : undefined;
   return hit ? table[hit] : table["*"];
 }
-export const lookupEolDate = (name: string, version: string) => lookupLifecycle(name, version)?.eol;
-export const lookupEosDate = (name: string, version: string) => lookupLifecycle(name, version)?.eos;
 
 /* ------------------------------- resolution ------------------------------- */
 export type DateSource = "Uploaded file" | "endoflife.date" | "Curated vendor data";

@@ -5,7 +5,7 @@
  * PDF, DOCX, Excel, CSV or JSON. Runs automatically after every upload.
  */
 import type { ComponentProfile, PlatformAnalysis } from "@/lib/platform-intel";
-import { exportCsv, exportJson, exportXlsx, type Sheet } from "@/lib/export-analysis";
+import { exportCsv, exportJson, type Sheet } from "@/lib/export-analysis";
 
 export type UtiField = { field: string; description: string; value: string };
 export type UtiSection = { title: string; columns: string[]; rows: (string | number)[][]; narrative?: string[] };
@@ -211,7 +211,7 @@ export function buildUtiReport(dataset: string, a: PlatformAnalysis, raw?: RawLa
     raw,
     vulnRows: p.map((x) => [
       dash(x.name), dash(x.version), dash(x.cve), x.cvss || "—", x.severity.toUpperCase(),
-      x.estimated ? "Derived (analysis)" : "Declared (SBOM)",
+      x.severitySource,
       x.kev ? "KEV — actively exploited" : x.exploit ? "Public exploit" : "None known",
       dash(x.remediationStatus), dash(x.targetVersion || x.latestVersion), dash(x.evidenceSource), dash(x.confidence),
     ]),

@@ -1,22 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import {
-  Activity, AlertCircle, AlertTriangle, Boxes, Building2, Bug, Calendar,
-  CheckCircle2, Gauge, Info, Package, RefreshCw, Satellite, Shield, ShieldAlert,
-  ShieldCheck, Sparkles, Wrench, XCircle, LifeBuoy, ArrowUpCircle, HelpCircle, Replace,
-} from "lucide-react";
-import {
-  useWorkbench, ActiveFilterChip, SearchBar, NoDataset, severityConfig,
-  askAnalyst, useAnimatedCount, FindingsPanel,
-} from "@/lib/workbench-shared";
+import { Activity, AlertCircle, AlertTriangle, Boxes, Building2, Bug, Calendar, CheckCircle2, Gauge, Info, Package, RefreshCw, Satellite, Shield, ShieldAlert, ShieldCheck, Sparkles, Wrench, XCircle, LifeBuoy, ArrowUpCircle, HelpCircle, Replace } from "lucide-react";
+import { useWorkbench, ActiveFilterChip, SearchBar, NoDataset, severityConfig, askAnalyst, useAnimatedCount, FindingsPanel } from "@/lib/workbench-shared";
 import { ComponentTable } from "@/components/ComponentTable";
 import type { SeverityKey } from "@/lib/workbench-shared";
 
 import { buildVulnIntel, type GroupRisk, type VulnRecord } from "@/lib/vuln-intel";
-import {
-  lifecycleTone, supportTone, remediationTone, priorityTone, confidenceTone,
-} from "@/lib/lifecycle-intel";
+import { lifecycleTone, supportTone, remediationTone, priorityTone, confidenceTone } from "@/lib/lifecycle-intel";
 import { lifecycleDateLines, lifecycleDisplayText } from "@/lib/lifecycle-display";
 import { DataTable, type Col } from "@/components/VulnTable";
 import { Button } from "@/components/ui/button";
@@ -251,11 +242,12 @@ function VulnPage() {
     { key: "cvss", label: "CVSS", value: (r) => r.cvss, align: "right", mono: true },
     { key: "published", label: "Published", value: (r) => r.published },
     { key: "severity", label: "Severity", value: (r) => r.severity, render: (r) => <SevChip sev={r.severity} />, filterable: true },
-    { key: "severitySource", label: "Severity basis", value: (r) => r.severitySource, filterable: true,
-      render: (r) => <Badge text={r.severitySource} tone={r.severitySource.startsWith("Declared") ? "info" : r.severitySource.startsWith("Escalated") ? "high" : "medium"} /> },
-    { key: "severityScore", label: "Severity score", value: (r) => r.severityScore, align: "right", mono: true },
-    { key: "severityFactors", label: "Classification factors",
-      value: (r) => r.severityFactors.map((x) => `${x.label} +${x.points}`).join(", ") || "No contributing signals" },
+    { key: "severitySource", label: "CVSS source (NIST)", value: (r) => r.severitySource, filterable: true,
+      render: (r) => <Badge text={r.severitySource} tone={r.severitySource === "NIST NVD" ? "low" : r.severitySource === "Declared severity" || r.severitySource === "Unscored" ? "info" : "medium"} /> },
+    { key: "cvssVector", label: "CVSS vector", value: (r) => r.cvssVector || "—", mono: true },
+    { key: "riskScore", label: "Risk score", value: (r) => r.riskScore, align: "right", mono: true },
+    { key: "riskFactors", label: "Risk factors",
+      value: (r) => r.riskFactors.map((x) => `${x.label} +${x.points}`).join(", ") || "No contributing signals" },
     ...lifecycleColumns.filter((c) => c.key !== "component" && c.key !== "version"),
     {
       key: "exploitStatus", label: "Exploit status", value: (r) => r.exploitStatus,
@@ -290,12 +282,12 @@ function VulnPage() {
     <div className="grid gap-3 text-xs md:grid-cols-2">
       <div className="space-y-1.5 md:col-span-2">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Severity classification — {r.severitySource} · score {r.severityScore}/100
+          NIST severity — {r.severitySource} · risk score {r.riskScore}/100
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {r.severityFactors.length === 0
+          {r.riskFactors.length === 0
             ? <span className="text-muted-foreground">No contributing signals present in this row.</span>
-            : r.severityFactors.map((x) => (
+            : r.riskFactors.map((x) => (
               <span key={x.label} title={x.detail}
                 className="chip border border-border/60 bg-muted/40 text-foreground">
                 {x.label} +{x.points}
