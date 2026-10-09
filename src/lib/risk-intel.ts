@@ -219,7 +219,7 @@ function groupTop(rows: Row[], key: (f: Facts) => string, limit = 8) {
 export function riskScore(rows: Row[]) {
   const c = counts(rows);
   const total = Math.max(1, rows.length);
-  const weighted = c.critical * 10 + c.high * 6 + c.medium * 3 + c.low * 1;
+  const weighted = c.critical * 10 + c.high * 7 + c.medium * 4 + c.low * 1; // same weights as the platform overall risk
   const score = Math.max(0, Math.min(100, Math.round(100 - (weighted / (total * 10)) * 100)));
   return score;
 }
@@ -254,7 +254,7 @@ function tableOf(title: string, rows: Row[], limit = 200): TableSpec {
 /* ----------------------------------- main entry -------------------------------- */
 export function buildReport(
   query: string,
-  ctx: { datasetName: string; rows: Row[] },
+  ctx: { datasetName: string; rows: Row[]; /** the platform's own NIST-scored totals — when given, the analyst quotes exactly these */ shared?: { counts: Record<SevKey, number>; securityScore: number } },
 ): AnalysisReport | null {
   const intent = detectIntent(query);
   if (!intent) return null;
@@ -265,8 +265,8 @@ export function buildReport(
   const base = { intent, datasetName: ctx.datasetName, generatedAt } as const;
 
   const facts = all.map(factsOf);
-  const c = counts(all);
-  const score = riskScore(all);
+  const c = ctx.shared?.counts ?? counts(all);
+  const score = ctx.shared?.securityScore ?? riskScore(all);
 
   if (intent === "exploitable") {
     const hits = all.filter((_, i) => facts[i].kev || facts[i].exploit || facts[i].cvss >= 9 || facts[i].severity === "critical");

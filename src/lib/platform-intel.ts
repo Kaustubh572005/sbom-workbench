@@ -6,7 +6,8 @@
  * Comparison views need. Pure functions, no IO — safe for 100k+ rows.
  */
 
-import type { RiskFactor, ScoreSource } from "@/lib/nist-scoring";
+import { postureBand, type RiskFactor, type ScoreSource } from "@/lib/nist-scoring";
+import { daysToEol } from "@/lib/lifecycle-dates";
 import { buildVulnIntel, intelKey, type Enrichment, type VulnIntel, type VulnRecord } from "@/lib/vuln-intel";
 import type { SevKey } from "@/lib/risk-intel";
 import { lifecycleDisplayText } from "@/lib/lifecycle-display";
@@ -309,7 +310,8 @@ function exposureOf(row: Row, blob: string): ComponentProfile["exposure"] {
 }
 
 function riskCategoryOf(score: number): ComponentProfile["riskCategory"] {
-  return score >= 80 ? "Critical" : score >= 60 ? "High" : score >= 35 ? "Moderate" : "Low";
+  // component risk = CVSS × 10 (+ uplifts), so these cut-offs line up with the NIST bands (9.0 / 7.0 / 4.0)
+  return score >= 90 ? "Critical" : score >= 70 ? "High" : score >= 40 ? "Moderate" : "Low";
 }
 
 export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment> = {}): {
@@ -380,6 +382,26 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
   return { profiles, intel };
 }
 
+/**
+ * The row as every other screen sees it: original columns plus the shared NIST severity / CVSS / dates.
+ * Used wherever a row is handed to code that reads raw columns (AI analyst, chat context).
+ */
+export function canonicalRow(data: Row, p?: ComponentProfile): Row {
+  if (!p) return data;
+  const out: Row = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (/^(severity|risk|criticality|priority|impact|level|cvss|cvss score|base score|score)$/i.test(k.trim())) continue; // superseded by NIST values
+    out[k] = v;
+  }
+  out["Severity"] = p.severity === "none" ? "" : p.severity;
+  out["CVSS"] = p.cvss || "";
+  out["Application"] = p.application || out["Application"] || "";
+  out["EOL Date"] = p.eolDate || "Not published";
+  out["EOS Date"] = p.eosDate || "Not published";
+  out["Lifecycle Status"] = p.lifecycleStatus;
+  return out;
+}
+
 /* ============================== Platform analysis ============================== */
 export type KpiId =
   | "all" | "critical" | "high" | "medium" | "low" | "info"
@@ -417,6 +439,8 @@ export type PlatformAnalysis = {
   findings: Finding[];
 };
 
+const isPast = (d: string) => { const n = daysToEol(d); return n !== null && n < 0; };
+
 const KPI_PREDICATES: Record<KpiId, (p: ComponentProfile) => boolean> = {
   all: () => true,
   critical: (p) => p.severity === "critical",
@@ -425,8 +449,8 @@ const KPI_PREDICATES: Record<KpiId, (p: ComponentProfile) => boolean> = {
   low: (p) => p.severity === "low",
   info: (p) => p.severity === "info" || p.severity === "none",
   upgrade: (p) => /Upgrade Required|Update Available|Platform Migration Required/i.test(p.remediationStatus),
-  eol: (p) => /End of Life/i.test(p.lifecycleStatus),
-  eos: (p) => /End of Support/i.test(p.lifecycleStatus),
+  eol: (p) => isPast(p.eolDate) || /End of Life/i.test(p.lifecycleStatus),
+  eos: (p) => !isPast(p.eolDate) && !/End of Life/i.test(p.lifecycleStatus) && (isPast(p.eosDate) || /End of Support/i.test(p.lifecycleStatus)),
   deprecated: (p) => /Deprecated|Obsolete/i.test(p.lifecycleStatus),
   legacy: (p) => /Legacy/i.test(p.lifecycleStatus),
   unsupported: (p) => p.supportStatus === "Unsupported",
@@ -726,7 +750,7 @@ export function buildPlatformAnalysis(items: Item[], intelMap: Record<string, En
     missingMetadata,
     healthScore,
     overallRisk,
-    riskCategory: overallRisk >= 75 ? "Critical" : overallRisk >= 50 ? "Elevated" : overallRisk >= 25 ? "Moderate" : "Healthy",
+    riskCategory: postureBand(overallRisk).label,
     confidence,
     findings,
   };

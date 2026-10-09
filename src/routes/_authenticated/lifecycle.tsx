@@ -22,15 +22,18 @@ export const Route = createFileRoute("/_authenticated/lifecycle")({
   component: LifecyclePage,
 });
 
-const STAGES = ["Past EOL", "Within 90 days", "Within 1 year", "Supported", "No date published"] as const;
+const STAGES = ["Past EOL / EOS", "Within 90 days", "Within 1 year", "Supported", "No date published"] as const;
 type Stage = (typeof STAGES)[number];
 const STAGE_TONE: Record<Stage, SeverityKey> = {
-  "Past EOL": "critical", "Within 90 days": "high", "Within 1 year": "medium", "Supported": "low", "No date published": "info",
+  "Past EOL / EOS": "critical", "Within 90 days": "high", "Within 1 year": "medium", "Supported": "low", "No date published": "info",
 };
 
 /** the stage is driven by whichever date comes first: EOL, else EOS */
 function stageOf(p: ComponentProfile): Stage {
-  const d = daysToEol(p.eolDate) ?? daysToEol(p.eosDate);
+  // same rule as the dashboard: whichever of EOL / EOS comes first decides, and a status of End of Life / Support counts even without a date
+  const days = [daysToEol(p.eolDate), daysToEol(p.eosDate)].filter((n): n is number => n !== null);
+  const d = days.length ? Math.min(...days) : null;
+  if ((d !== null && d < 0) || /End of Life|End of Support/i.test(p.lifecycleStatus)) return "Past EOL / EOS";
   return eolStage(d) as Stage;
 }
 
@@ -65,7 +68,8 @@ function LifecyclePage() {
 
   if (!active) return <NoDataset />;
 
-  const counts = Object.fromEntries(STAGES.map((s) => [s, rows.filter((r) => r.stage === s).length])) as Record<Stage, number>;
+  // tiles count components (findings), exactly like the dashboard; the table lists each release once with ×N
+  const counts = Object.fromEntries(STAGES.map((s) => [s, rows.filter((r) => r.stage === s).reduce((n, r) => n + r.findings, 0)])) as Record<Stage, number>;
   const needle = q.trim().toLowerCase();
   const shown = rows.filter((r) => (stage === "all" || r.stage === stage) &&
     (!needle || `${r.component} ${r.version} ${r.application}`.toLowerCase().includes(needle)));
@@ -110,7 +114,7 @@ function LifecyclePage() {
               className={`card-elevated border p-4 text-left transition ${on ? `${cfg.border} ring-2 ${cfg.ring}` : "border-border/60 hover:bg-accent/30"}`}>
               <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{s}</div>
               <div className={`mt-1 text-2xl font-bold ${cfg.color}`}>{counts[s]}</div>
-              <div className="text-[10px] text-muted-foreground">{on ? "Filter active — click to clear" : "Click to filter"}</div>
+              <div className="text-[10px] text-muted-foreground">{on ? "components · click to clear" : "components · click to filter"}</div>
             </button>
           );
         })}

@@ -6,7 +6,7 @@ import { useWorkbench, ActiveFilterChip, SearchBar, NoDataset, severityConfig, a
 import { ComponentTable } from "@/components/ComponentTable";
 import type { SeverityKey } from "@/lib/workbench-shared";
 
-import { buildVulnIntel, type GroupRisk, type VulnRecord } from "@/lib/vuln-intel";
+import { summarizeVuln, type GroupRisk, type VulnRecord } from "@/lib/vuln-intel";
 import { lifecycleTone, supportTone, remediationTone, priorityTone, confidenceTone } from "@/lib/lifecycle-intel";
 import { lifecycleDateLines, lifecycleDisplayText } from "@/lib/lifecycle-display";
 import { DataTable, type Col } from "@/components/VulnTable";
@@ -117,14 +117,15 @@ function KpiTile({ label, value, tone, icon: Icon, active, onClick, glow }: {
 }
 
 function VulnPage() {
-  const { active, filteredComponents, setDrawerId, components, intelMap, intelAt, enriching, refreshIntel } = useWorkbench();
+  const { active, filteredComponents, setDrawerId, components, analysis, intelAt, enriching, refreshIntel } = useWorkbench();
   const [facet, setFacet] = useState<Facet>("all");
   const [section, setSection] = useState<Section>("all");
 
-  const intel = useMemo(
-    () => buildVulnIntel(filteredComponents.map((c) => ({ id: c.id, data: c.data })), intelMap),
-    [filteredComponents, intelMap],
-  );
+  /* same records the dashboard, SBOM table, reports and exports use — filtered, never re-scored */
+  const intel = useMemo(() => {
+    const ids = new Set(filteredComponents.map((c) => c.id));
+    return summarizeVuln(analysis.intel.records.filter((r) => ids.has(r.id)));
+  }, [filteredComponents, analysis]);
 
   if (!active) return <NoDataset />;
 

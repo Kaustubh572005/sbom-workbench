@@ -94,3 +94,11 @@ export function nistRisk(i: {
   const score = Math.min(100, factors.reduce((s, f) => s + f.points, 0));
   return { score, factors: factors.sort((a, b) => b.points - a.points) };
 }
+
+/** Overall posture band for an aggregate 0–100 risk score — the ONE definition used by the header, dashboard and datasets. */
+export function postureBand(score: number): { label: "Critical" | "Elevated" | "Moderate" | "Healthy"; tone: "critical" | "high" | "medium" | "low"; desc: string } {
+  return score >= 75 ? { label: "Critical", tone: "critical", desc: "Immediate action required" }
+    : score >= 50 ? { label: "Elevated", tone: "high", desc: "Prioritize remediation" }
+    : score >= 25 ? { label: "Moderate", tone: "medium", desc: "Monitor closely" }
+    : { label: "Healthy", tone: "low", desc: "Posture is healthy" };
+}

@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip } from "recharts";
-import { ShieldAlert, TrendingUp, TrendingDown, Boxes, Upload, FileBarChart, Sparkles, ArrowRight, Clock, Bell, Activity, Scale, Package, Database } from "lucide-react";
+import { Loader2, ShieldAlert, TrendingUp, TrendingDown, Boxes, Upload, FileBarChart, Sparkles, ArrowRight, Clock, Bell, Activity, Scale, Package, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkbench, NoDataset, severityConfig, useAnimatedCount, askAnalyst } from "@/lib/workbench-shared";
 
@@ -54,6 +54,27 @@ function ScoreDial({ label, value, caption, tone }: {
   );
 }
 
+type Snapshot = { t: number; risk: number; vuln: number; eol: number; total: number };
+const histKey = (id: string) => `sbom:history:${id}`;
+function loadHistory(id: string): Snapshot[] {
+  try { return JSON.parse(localStorage.getItem(histKey(id)) ?? "[]") as Snapshot[]; } catch { return []; }
+}
+function recordSnapshot(id: string, snap: Snapshot): Snapshot[] {
+  const list = loadHistory(id);
+  const last = list[list.length - 1];
+  const same = last && last.risk === snap.risk && last.vuln === snap.vuln && last.eol === snap.eol && last.total === snap.total;
+  if (same) return list; // nothing changed since the last scan
+  const next = [...list, snap].slice(-30);
+  try { localStorage.setItem(histKey(id), JSON.stringify(next)); } catch { /* storage unavailable */ }
+  return next;
+}
+
+const NoTrend = () => (
+  <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border/60 px-4 text-center text-[11px] text-muted-foreground">
+    Trend appears once this dataset has been scanned at least twice — real measurements only.
+  </div>
+);
+
 function TrendCard({ title, data, tone, icon: Icon, delta, unit }: {
   title: string; data: Array<{ x: string; y: number }>; tone: "critical" | "high" | "medium" | "low";
   icon: typeof Activity; delta: number; unit: string;
@@ -67,14 +88,16 @@ function TrendCard({ title, data, tone, icon: Icon, delta, unit }: {
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             <Icon className="h-3.5 w-3.5 text-primary" /> {title}
           </p>
-          <p className="mt-1.5 text-2xl font-bold tracking-tight">{data[data.length - 1]?.y ?? 0}<span className="ml-1 text-xs font-normal text-muted-foreground">{unit}</span></p>
+          <p className="mt-1.5 text-2xl font-bold tracking-tight">{data[data.length - 1]?.y ?? "—"}<span className="ml-1 text-xs font-normal text-muted-foreground">{unit}</span></p>
         </div>
-        <span className={`chip border text-[10px] ${up ? "border-severity-critical/40 bg-severity-critical/10 text-severity-critical" : "border-severity-low/40 bg-severity-low/10 text-severity-low"}`}>
-          {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />} {up ? "+" : ""}{delta}
-        </span>
+        {data.length > 1 && (
+          <span className={`chip border text-[10px] ${delta === 0 ? "border-border bg-muted/30 text-muted-foreground" : up ? "border-severity-critical/40 bg-severity-critical/10 text-severity-critical" : "border-severity-low/40 bg-severity-low/10 text-severity-low"}`}>
+            {delta === 0 ? "±0" : <>{up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />} {up ? "+" : ""}{delta}</>}
+          </span>
+        )}
       </div>
       <div className="mt-3 h-24">
-        <ResponsiveContainer width="100%" height="100%">
+        {data.length < 2 ? <NoTrend /> : <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -24 }}>
             <defs>
               <linearGradient id={`grad-${title.replace(/\s/g, "")}`} x1="0" y1="0" x2="0" y2="1">
@@ -88,7 +111,7 @@ function TrendCard({ title, data, tone, icon: Icon, delta, unit }: {
             <RTooltip contentStyle={{ fontSize: 11, borderRadius: 12 }} />
             <Area type="monotone" dataKey="y" stroke={cfg.hex} strokeWidth={2} fill={`url(#grad-${title.replace(/\s/g, "")})`} />
           </AreaChart>
-        </ResponsiveContainer>
+        </ResponsiveContainer>}
       </div>
     </div>
   );
@@ -98,24 +121,26 @@ function TrendCard({ title, data, tone, icon: Icon, delta, unit }: {
 function DashboardPage() {
   const {
     active, analysis, uploadHistory, riskBand, fileInputRef, uploading, datasets, exportAnalysis,
-    setKpiFilter, exportSection,
+    setKpiFilter, exportSection, enriching, intelAt,
   } = useWorkbench();
 
+  /* real history: one snapshot per scan is kept in this browser, so the trend is measured — never invented */
+  const vulnNow = analysis.counts.critical + analysis.counts.high + analysis.counts.medium;
+  const eolNow = analysis.counts.eol + analysis.counts.eos + analysis.counts.deprecated;
+  const [history, setHistory] = useState<Snapshot[]>([]);
+  useEffect(() => { setHistory(active ? loadHistory(active.id) : []); }, [active?.id]);
+  useEffect(() => {
+    // wait for live NIST / vendor data to finish so half-enriched numbers are never stored
+    if (!active || enriching || !analysis.profiles.length) return;
+    setHistory(recordSnapshot(active.id, { t: Date.now(), risk: analysis.overallRisk, vuln: vulnNow, eol: eolNow, total: analysis.profiles.length }));
+  }, [active?.id, enriching, analysis.overallRisk, vulnNow, eolNow, analysis.profiles.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const trends = useMemo(() => {
-    // deterministic 14-point history anchored on today's measured values
-    const shape = [0.62, 0.66, 0.7, 0.74, 0.71, 0.78, 0.82, 0.79, 0.85, 0.88, 0.9, 0.93, 0.97, 1];
-    const point = (base: number) => shape.map((f, i) => ({ x: `D${i + 1}`, y: Math.round(base * f) }));
-    const vulnBase = analysis.counts.critical + analysis.counts.high + analysis.counts.medium;
-    const eolBase = analysis.counts.eol + analysis.counts.eos + analysis.counts.deprecated;
-    return {
-      risk: point(analysis.overallRisk),
-      vuln: point(vulnBase),
-      eol: point(eolBase),
-      riskDelta: analysis.overallRisk - Math.round(analysis.overallRisk * 0.97),
-      vulnDelta: vulnBase - Math.round(vulnBase * 0.97),
-      eolDelta: eolBase - Math.round(eolBase * 0.97),
-    };
-  }, [analysis]);
+    const series = (key: "risk" | "vuln" | "eol") =>
+      history.map((h) => ({ x: new Date(h.t).toLocaleDateString([], { day: "2-digit", month: "short" }) + " " + new Date(h.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), y: h[key] }));
+    const delta = (key: "risk" | "vuln" | "eol") => (history.length > 1 ? history[history.length - 1][key] - history[history.length - 2][key] : 0);
+    return { risk: series("risk"), vuln: series("vuln"), eol: series("eol"), riskDelta: delta("risk"), vulnDelta: delta("vuln"), eolDelta: delta("eol") };
+  }, [history]);
 
   const appsAtRisk = useMemo(() => {
     const map = new Map<string, { critical: number; high: number; risk: number; count: number }>();
@@ -186,6 +211,11 @@ function DashboardPage() {
             <h1 className="font-display mt-2 break-words text-3xl font-semibold text-foreground">{active.name}</h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {analysis.profiles.length.toLocaleString()} components across {analysis.applications.length || 1} application(s) · {analysis.confidence}% analysis confidence
+            </p>
+            <p className={`mt-1.5 flex items-center gap-1.5 text-[11px] ${enriching ? "text-primary" : "text-muted-foreground"}`}>
+              {enriching
+                ? <><Loader2 className="h-3 w-3 animate-spin" /> Updating with live NIST NVD &amp; vendor lifecycle data — figures below may still change</>
+                : intelAt ? `Live NIST NVD & vendor data applied · ${new Date(intelAt).toLocaleTimeString()}` : "Based on the uploaded file only (live data unavailable)"}
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
               <Button size="sm" className="rounded-xl" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
@@ -261,7 +291,7 @@ function DashboardPage() {
         <div className="card-elevated border border-border/60 p-5 lg:p-6">
           <div className="flex items-center gap-2"><Activity className="h-4 w-4 text-primary" /><h2 className="font-display text-lg font-semibold">Risk trend</h2></div>
           <div className="mt-4 h-64">
-            <ResponsiveContainer width="100%" height="100%">
+            {trends.risk.length < 2 ? <NoTrend /> : <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={trends.risk} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
                 <defs><linearGradient id="dashboard-risk" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--color-primary)" stopOpacity={0.2} /><stop offset="100%" stopColor="var(--color-primary)" stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" vertical={false} />
@@ -269,7 +299,7 @@ function DashboardPage() {
                 <RTooltip contentStyle={{ fontSize: 11, borderRadius: 12, borderColor: "var(--color-border)" }} />
                 <Area type="monotone" dataKey="y" stroke="var(--color-primary)" strokeWidth={2.5} fill="url(#dashboard-risk)" />
               </AreaChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer>}
           </div>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">
