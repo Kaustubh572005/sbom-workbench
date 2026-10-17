@@ -27,6 +27,10 @@ export type Enrichment = {
   cvss?: number;
   cvssVector?: string;
   cvePublished?: string;
+  /** OSV.dev advisories for the package release: CVE ids and the worst CVSS v3 score (NIST formula) */
+  cves?: string[];
+  osvCvss?: number;
+  osvVector?: string;
   advisoryIds?: string[];
   summary?: string;
   updatedAt?: string;
@@ -117,6 +121,8 @@ export function toVulnRecord(id: string, raw: Row, feedIntel: Enrichment = {}): 
     nvdScore: intel.cvss,
     uploadedScore: f.cvss,
     vector: intel.cvssVector || pick(raw, ["cvss vector", "vector string", "cvss3 vector", "cvss v3 vector", "vector"]),
+    osvScore: intel.osvCvss,
+    osvVector: intel.osvVector,
     declared: declaredSeverity,
   });
   const sev: SevKey = nist.severity;

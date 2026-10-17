@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { cvssFromVector } from "@/lib/nist-scoring";
 
 /**
  * Live external threat intelligence.
@@ -7,7 +8,7 @@ import { createServerFn } from "@tanstack/react-start";
  * into a separate `intel` namespace with a last-updated timestamp.
  */
 
-type Target = { key: string; component: string; version: string; cve: string; ecosystem?: string };
+type Target = { key: string; component: string; version: string; cve: string; ecosystem?: string; purl?: string };
 
 export type EnrichResult = Record<
   string,
@@ -19,6 +20,11 @@ export type EnrichResult = Record<
     eolDate?: string;
     supportEndDate?: string;
     advisoryIds?: string[];
+    /** CVE ids OSV.dev lists for this package release (only when the row carries no CVE of its own) */
+    cves?: string[];
+    /** highest CVSS v3 base score among those advisories, computed from their vectors with the NIST formula */
+    osvCvss?: number;
+    osvVector?: string;
     summary?: string;
     updatedAt: string;
     source: string;
@@ -53,22 +59,42 @@ type OsvVuln = {
   id?: string;
   summary?: string;
   aliases?: string[];
+  severity?: Array<{ type?: string; score?: string }>;
   affected?: Array<{ ranges?: Array<{ events?: Array<{ fixed?: string }> }> }>;
 };
 
-const osvCache = new Map<string, Awaited<ReturnType<typeof osvQuery>>>();
+const osvCache = new Map<string, OsvResult>();
 async function osvLookup(t: Target) {
-  const k = `${t.component}|${t.version}|${t.ecosystem ?? ""}`.toLowerCase();
+  const k = `${t.purl ?? t.component}|${t.version}|${t.ecosystem ?? ""}`.toLowerCase();
   if (!osvCache.has(k)) osvCache.set(k, await osvQuery(t));
   return osvCache.get(k) ?? null;
 }
 
-async function osvQuery(t: Target): Promise<{ fixedVersion?: string; advisoryIds?: string[]; summary?: string } | null> {
+/** OSV ecosystem names for the ecosystems SBOMs usually declare */
+const OSV_ECOSYSTEM: Record<string, string> = {
+  npm: "npm", maven: "Maven", pypi: "PyPI", nuget: "NuGet", golang: "Go", go: "Go", cargo: "crates.io",
+  gem: "RubyGems", rubygems: "RubyGems", composer: "Packagist", packagist: "Packagist", pub: "Pub", hex: "Hex",
+};
+
+type OsvResult = {
+  fixedVersion?: string; advisoryIds?: string[]; summary?: string; cves?: string[]; osvCvss?: number; osvVector?: string;
+} | null;
+
+async function osvQuery(t: Target): Promise<OsvResult> {
   if (!t.component) return null;
   try {
-    const body: Record<string, unknown> = { package: { name: t.component } };
-    if (t.ecosystem) (body.package as Record<string, unknown>).ecosystem = t.ecosystem;
-    if (t.version) body.version = t.version;
+    // OSV needs either a purl or name + ecosystem — a bare package name is rejected
+    const eco = OSV_ECOSYSTEM[(t.ecosystem ?? "").toLowerCase().trim()];
+    const body: Record<string, unknown> = {};
+    if (t.purl) {
+      body.package = { purl: t.purl };
+      if (!/@[^/]+$/.test(t.purl) && t.version) body.version = t.version;
+    } else if (eco) {
+      body.package = { name: t.component, ecosystem: eco };
+      if (t.version) body.version = t.version;
+    } else {
+      return null;
+    }
     const res = await fetch("https://api.osv.dev/v1/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -79,17 +105,28 @@ async function osvQuery(t: Target): Promise<{ fixedVersion?: string; advisoryIds
     const vulns = json.vulns ?? [];
     if (!vulns.length) return null;
     let fixedVersion = "";
+    let osvCvss = 0;
+    let osvVector = "";
+    const cves = new Set<string>();
     for (const v of vulns) {
       for (const a of v.affected ?? []) {
         for (const r of a.ranges ?? []) {
           for (const e of r.events ?? []) if (e.fixed) fixedVersion = fixedVersion || e.fixed;
         }
       }
+      for (const id of [v.id, ...(v.aliases ?? [])]) if (id && /^CVE-\d{4}-\d{4,}$/i.test(id)) cves.add(id.toUpperCase());
+      for (const sv of v.severity ?? []) {
+        const score = sv.score ? cvssFromVector(sv.score) : null;
+        if (score && score > osvCvss) { osvCvss = score; osvVector = sv.score ?? ""; }
+      }
     }
     return {
       fixedVersion: fixedVersion || undefined,
       advisoryIds: vulns.slice(0, 5).map((v) => String(v.id ?? "")).filter(Boolean),
       summary: vulns[0]?.summary,
+      cves: [...cves].slice(0, 20),
+      osvCvss: osvCvss || undefined,
+      osvVector: osvVector || undefined,
     };
   } catch {
     return null;
@@ -167,23 +204,22 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return out;
 }
 
-export const enrichThreatIntel = createServerFn({ method: "POST" })
-  .inputValidator((input: { targets: Target[] }) => {
-    if (!input || !Array.isArray(input.targets)) throw new Error("targets required");
-    return { targets: input.targets.slice(0, 300) };
-  })
-  .handler(async ({ data }) => {
+/** the enrichment itself — a plain function so it can be exercised without the server-function transport */
+export async function enrichTargets(targets: Target[]) {
     const kev = await loadKev();
     const updatedAt = new Date().toISOString();
     const out: EnrichResult = {};
 
-    await mapLimit(data.targets, 8, async (t) => {
+    await mapLimit(targets, 8, async (t) => {
       const cve = t.cve.toUpperCase().trim();
-      const isKev = Boolean(cve && kev.has(cve));
+      let isKev = Boolean(cve && kev.has(cve));
       const [osv, eol] = await Promise.all([
         t.component ? osvLookup(t) : Promise.resolve(null),
         t.component ? eolLookup(t.component, t.version) : Promise.resolve(null),
       ]);
+      // package-level advisories describe the whole release, so they only score rows that carry no CVE of their own
+      const pkgLevel = !cve && osv;
+      if (pkgLevel && osv.cves?.some((c) => kev.has(c))) isKev = true;
       const sources = ["CISA KEV"];
       if (osv) sources.push("OSV.dev");
       if (eol) sources.push("endoflife.date");
@@ -195,6 +231,9 @@ export const enrichThreatIntel = createServerFn({ method: "POST" })
         eolDate: eol?.eol,
         supportEndDate: eol?.support,
         advisoryIds: osv?.advisoryIds,
+        cves: pkgLevel ? osv.cves : undefined,
+        osvCvss: pkgLevel ? osv.osvCvss : undefined,
+        osvVector: pkgLevel ? osv.osvVector : undefined,
         summary: osv?.summary,
         updatedAt,
         source: sources.join(" · "),
@@ -202,4 +241,11 @@ export const enrichThreatIntel = createServerFn({ method: "POST" })
     });
 
     return { intel: out, updatedAt, kevSize: kev.size };
-  });
+}
+
+export const enrichThreatIntel = createServerFn({ method: "POST" })
+  .inputValidator((input: { targets: Target[] }) => {
+    if (!input || !Array.isArray(input.targets)) throw new Error("targets required");
+    return { targets: input.targets.slice(0, 300) };
+  })
+  .handler(async ({ data }) => enrichTargets(data.targets));

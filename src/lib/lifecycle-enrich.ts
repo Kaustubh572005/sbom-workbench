@@ -8,7 +8,12 @@ import { intelKey, lifeKey, type Enrichment } from "@/lib/vuln-intel";
 import { cveIds } from "@/lib/nist-scoring";
 import type { NvdRecord } from "@/lib/nist-nvd.functions";
 
-type Target = { key: string; component: string; version: string; cve: string };
+type Target = { key: string; component: string; version: string; cve: string; ecosystem?: string; purl?: string };
+
+const field = (row: Record<string, unknown>, re: RegExp) => {
+  const v = Object.entries(row).find(([k]) => re.test(k.trim()))?.[1];
+  return typeof v === "string" ? v.trim() : "";
+};
 export type EnrichFn = (args: { data: { targets: Target[] } }) => Promise<{ intel: Record<string, Enrichment>; updatedAt: string }>;
 export type NvdFn = (args: { data: { cves: string[] } }) => Promise<{ records: Record<string, NvdRecord>; fetchedAt: string }>;
 export type Enrichers = { enrich: EnrichFn; nvd: NvdFn };
@@ -44,11 +49,16 @@ export async function enrichRows(
     if (seenKey.has(key) || known[key]) continue;
     seenKey.add(key);
     const release = lifeKey(r);
-    const t = { key, component: f.component, version: f.version, cve: f.cve };
+    const t: Target = {
+      key, component: f.component, version: f.version, cve: f.cve,
+      ecosystem: field(r, /^ecosystem$/i) || undefined,
+      purl: field(r, /^(purl|package ?url)$/i) || undefined,
+    };
     if (!seenRelease.has(release) && !known[release]) { seenRelease.add(release); firstOfRelease.push(t); } else rest.push(t);
   }
   // one look-up per release first (EOL/EOS coverage), then the remaining CVE rows (KEV / advisories)
   const queue = [...firstOfRelease, ...rest].slice(0, CAP);
+  const osvCves = new Map<string, Set<string>>(); // CVEs OSV found for inventory rows that have none of their own
   for (let i = 0; i < queue.length; i += BATCH) {
     if (cancelled()) return;
     const batch = queue.slice(i, i + BATCH);
@@ -58,6 +68,7 @@ export async function enrichRows(
       for (const t of batch) {
         const e = res.intel[t.key];
         if (!e) continue;
+        if (e.cves?.length && !e.osvCvss) for (const c of e.cves) { const keys = osvCves.get(c) ?? new Set<string>(); keys.add(t.key); osvCves.set(c, keys); }
         const lk = lifeKey({ component: t.component, version: t.version });
         patch[lk] = { eolDate: e.eolDate, supportEndDate: e.supportEndDate, latestVersion: e.latestVersion, updatedAt: e.updatedAt, source: e.source };
       }
@@ -75,9 +86,11 @@ export async function enrichRows(
     if (known[key]?.cvss) continue;
     for (const id of cveIds(f.cve)) {
       if (!cveKeys.has(id)) cveKeys.set(id, new Set());
-      cveKeys.get(id)!.add(key);
+      cveKeys.get(id)?.add(key);
     }
   }
+  // CVEs OSV listed without a usable CVSS vector are scored by NVD too — after the file's own CVEs
+  for (const [c, keys] of osvCves) { if (!cveKeys.has(c)) cveKeys.set(c, new Set()); for (const k of keys) cveKeys.get(c)?.add(k); }
   const ids = [...cveKeys.keys()].slice(0, 200);
   for (let i = 0; i < ids.length; i += 40) {
     if (cancelled()) return;

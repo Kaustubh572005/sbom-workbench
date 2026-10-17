@@ -353,7 +353,7 @@ export function buildProfiles(items: Item[], intelMap: Record<string, Enrichment
       cvss: rec.cvss,
       severity: rec.severity,
       severitySource: rec.severitySource,
-      scoreConfidence: { "NIST NVD": 95, "Uploaded CVSS": 90, "CVSS vector (computed)": 90, "Declared severity": 60, Unscored: 30 }[rec.severitySource],
+      scoreConfidence: { "NIST NVD": 95, "Uploaded CVSS": 90, "CVSS vector (computed)": 90, "OSV advisory (CVSS computed)": 85, "Declared severity": 60, Unscored: 30 }[rec.severitySource],
       riskFactors: rec.riskFactors,
       lifecycleStatus: rec.lifecycle.lifecycleStatus,
       supportStatus: rec.lifecycle.supportStatus,
@@ -523,7 +523,7 @@ export function buildPlatformAnalysis(items: Item[], intelMap: Record<string, En
     missingMetadata: missingMetadata.length,
     kev: count(KPI_PREDICATES.kev),
     duplicates: profiles.filter((p) => dupNames.has(p.name.toLowerCase())).length,
-    multiVersion: duplicates.length,
+    multiVersion: profiles.filter((p) => dupNames.has(p.name.toLowerCase())).length, // components, so the card equals the list it opens
     internetFacing: count(KPI_PREDICATES.internetFacing),
   };
 
