@@ -9,12 +9,14 @@
  *     1. NIST NVD (live lookup by CVE)
  *     2. the CVSS score uploaded in the file
  *     3. computed from an uploaded CVSS v3.x vector using the NIST/FIRST formula
- *     4. a declared severity label (no score) — kept, but flagged as declared
+ *     4. computed the same way from the CVSS vectors of OSV.dev advisories for the package release
+ *        (inventory-only SBOMs carry no CVEs, so this is how they get a NIST score)
+ *     5. a declared severity label (no score) — kept, but flagged as declared
  * A declared label never overrides a CVSS score: NIST bands always win.
  */
 import type { SevKey } from "@/lib/risk-intel";
 
-export type ScoreSource = "NIST NVD" | "Uploaded CVSS" | "CVSS vector (computed)" | "Declared severity" | "Unscored";
+export type ScoreSource = "NIST NVD" | "Uploaded CVSS" | "CVSS vector (computed)" | "OSV advisory (CVSS computed)" | "Declared severity" | "Unscored";
 
 export const nistSeverity = (score: number): SevKey =>
   score >= 9 ? "critical" : score >= 7 ? "high" : score >= 4 ? "medium" : score > 0 ? "low" : "none";
@@ -40,11 +42,11 @@ export function cvssFromVector(vector: string): number | null {
   const changed = v.S === "C";
   const PR = (changed ? { N: 0.85, L: 0.68, H: 0.5 } : { N: 0.85, L: 0.62, H: 0.27 })[v.PR ?? ""];
   const [C, I, A] = [cia("C"), cia("I"), cia("A")];
-  if ([AV, AC, UI, PR, C, I, A].some((x) => x === undefined) || (v.S !== "C" && v.S !== "U")) return null;
-  const iss = 1 - (1 - C!) * (1 - I!) * (1 - A!);
+  if (AV === undefined || AC === undefined || UI === undefined || PR === undefined || C === undefined || I === undefined || A === undefined || (v.S !== "C" && v.S !== "U")) return null;
+  const iss = 1 - (1 - C) * (1 - I) * (1 - A);
   const impact = changed ? 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15) : 6.42 * iss;
   if (impact <= 0) return 0;
-  const exploitability = 8.22 * AV! * AC! * PR! * UI!;
+  const exploitability = 8.22 * AV * AC * PR * UI;
   return roundUp(Math.min(changed ? 1.08 * (impact + exploitability) : impact + exploitability, 10));
 }
 
@@ -53,7 +55,7 @@ export type ResolvedSeverity = { score: number; severity: SevKey; source: ScoreS
 
 const validScore = (n: unknown) => (typeof n === "number" && n > 0 && n <= 10 ? Math.round(n * 10) / 10 : 0);
 
-export function resolveSeverity(i: { nvdScore?: number; uploadedScore?: number; vector?: string; declared: SevKey }): ResolvedSeverity {
+export function resolveSeverity(i: { nvdScore?: number; uploadedScore?: number; vector?: string; osvScore?: number; osvVector?: string; declared: SevKey }): ResolvedSeverity {
   const vector = (i.vector ?? "").trim();
   const nvd = validScore(i.nvdScore);
   if (nvd) return { score: nvd, severity: nistSeverity(nvd), source: "NIST NVD", vector };
@@ -61,6 +63,8 @@ export function resolveSeverity(i: { nvdScore?: number; uploadedScore?: number; 
   if (up) return { score: up, severity: nistSeverity(up), source: "Uploaded CVSS", vector };
   const computed = vector ? validScore(cvssFromVector(vector) ?? 0) : 0;
   if (computed) return { score: computed, severity: nistSeverity(computed), source: "CVSS vector (computed)", vector };
+  const osv = validScore(i.osvScore);
+  if (osv) return { score: osv, severity: nistSeverity(osv), source: "OSV advisory (CVSS computed)", vector: i.osvVector ?? "" };
   if (i.declared !== "none") return { score: 0, severity: i.declared, source: "Declared severity", vector };
   return { score: 0, severity: "none", source: "Unscored", vector };
 }
