@@ -5,7 +5,7 @@ import { enrichRows, mergeIntel } from "./lifecycle-enrich";
 import { intelKey } from "./vuln-intel";
 
 mock.module("@tanstack/react-start", () => ({
-  createServerFn: () => ({ inputValidator: () => ({ handler: (fn: unknown) => fn }) }),
+  createServerFn: () => ({ inputValidator: () => ({ handler: (fn) => fn }) }),
 }));
 const { enrichTargets } = await import("./threat-intel.functions");
 const vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H";
@@ -60,8 +60,8 @@ test("inventory enrichment passes package identifiers and sends unscored OSV CVE
 });
 
 test("OSV package queries score the worst vector, detect KEV, and never replace a CVE-specific score", async () => {
-  const queries: unknown[] = [];
-  globalThis.fetch = mock(async (input: string | URL | Request, init?: RequestInit) => {
+  const queries = [];
+  globalThis.fetch = mock(async (input, init) => {
     const url = String(input);
     if (url.includes("known_exploited")) return Response.json({ vulnerabilities: [{ cveID: "CVE-2024-12345" }] });
     if (url.includes("api.osv.dev")) {
@@ -69,7 +69,7 @@ test("OSV package queries score the worst vector, detect KEV, and never replace 
       return Response.json({ vulns: [{ id: "GHSA-test", aliases: ["CVE-2024-12345"], severity: [{ type: "CVSS_V3", score: vector }] }] });
     }
     return Response.json([], { status: 404 });
-  }) as typeof fetch;
+  });
   const result = await enrichTargets([
     { key: "inventory", component: "test-package", version: "1", cve: "", purl: "pkg:npm/test-package@1" },
     { key: "specific", component: "another-package", version: "2", cve: "CVE-2025-54321", ecosystem: "pypi" },
